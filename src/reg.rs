@@ -1,4 +1,4 @@
-use std::ptr::NonNull;
+use std::{collections::HashSet, ptr::NonNull};
 
 use crate::{
     tour::{MetaNode, Node, NodeKind},
@@ -11,6 +11,7 @@ pub struct NodeRegistry<M> {
     cache: DistanceCache,
     locations: Vec<f64>,
     nodes: Vec<MetaNode<M>>,
+    depots: HashSet<usize>,
 }
 
 impl<M> NodeRegistry<M> {
@@ -20,16 +21,28 @@ impl<M> NodeRegistry<M> {
             cache: DistanceCache::default(),
             locations: Vec::new(),
             nodes: Vec::new(),
+            depots: HashSet::new(),
         }
     }
 
-    pub fn with_capacity(dim: usize, capacity: usize) -> Self {
+    pub fn with_capacity(dim: usize, capacity: usize, n_depots: usize) -> Self {
         Self {
             dim,
             cache: DistanceCache::default(),
             locations: Vec::with_capacity(dim * capacity),
             nodes: Vec::with_capacity(capacity),
+            depots: HashSet::with_capacity(n_depots),
         }
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
     }
 
     #[inline]
@@ -55,16 +68,37 @@ impl<M> NodeRegistry<M> {
         self.nodes.get(index.index())
     }
 
+    #[inline]
+    pub fn depot(&self) -> Option<&MetaNode<M>> {
+        match self.depots.iter().take(1).next() {
+            Some(id) => self.nodes.get(*id),
+            None => None,
+        }
+    }
+
     pub fn add(&mut self, mut location: Vec<f64>, kind: NodeKind, demand: f64, metadata: M) -> Node
     where
         M: Clone,
     {
         let index = self.nodes.len();
         let mn = MetaNode::new(index, kind, demand, metadata);
-        let node = mn.node();
+        let node = mn.node().clone();
         self.nodes.push(mn);
         self.locations.append(&mut location);
+
+        if kind == NodeKind::Depot {
+            self.depots.insert(node.index());
+        }
+
         node
+    }
+
+    pub fn node_iter(&self) -> std::slice::Iter<MetaNode<M>> {
+        self.nodes.iter()
+    }
+
+    pub fn node_iter_mut(&mut self) -> std::slice::IterMut<MetaNode<M>> {
+        self.nodes.iter_mut()
     }
 
     /// Computes the distance matrix between nodes by using the given function ```f``` and stores
@@ -124,13 +158,33 @@ impl<M> NodeRegistry<M> {
     }
 }
 
+impl<M> Drop for NodeRegistry<M> {
+    fn drop(&mut self) {
+        unsafe {
+            for node in self.nodes.drain(..) {
+                let (mut node, _) = node.into_value();
+                if let Some(inner) = std::mem::take(&mut node.inner) {
+                    (*inner.as_ptr()).route = None;
+                    (*inner.as_ptr()).predecessor = None;
+                    (*inner.as_ptr()).successor = None;
+                    Box::from_raw(inner.as_ptr());
+                }
+            }
+
+            if let Some(ptr) = std::mem::take(&mut self.cache.inner) {
+                let _ = Box::from_raw(ptr.as_ptr());
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct DistanceCache {
     inner: Option<NonNull<InnerCache>>,
 }
 
 impl DistanceCache {
-    pub fn new(len: usize, distances: Vec<f64>, nearest_nb: Vec<usize>) -> Self {
+    pub(super) fn new(len: usize, distances: Vec<f64>, nearest_nb: Vec<usize>) -> Self {
         let inner = Box::new(InnerCache {
             len,
             distances,
@@ -142,7 +196,7 @@ impl DistanceCache {
         }
     }
 
-    pub fn distance<I>(&self, a: I, b: I) -> f64
+    pub fn distance<I>(&self, a: &I, b: &I) -> f64
     where
         I: NodeIndex,
     {
@@ -186,16 +240,6 @@ impl Default for DistanceCache {
     }
 }
 
-impl Drop for DistanceCache {
-    fn drop(&mut self) {
-        if let Some(ptr) = std::mem::take(&mut self.inner) {
-            unsafe {
-                let _ = Box::from_raw(ptr.as_ptr());
-            }
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 struct InnerCache {
     len: usize,
@@ -224,11 +268,11 @@ mod tests {
         node_reg.compute(&lrd);
         let cache = node_reg.cache();
 
-        assert_eq!(6., cache.distance(1, 3));
-        assert_eq!(6., cache.distance(3, 1));
-        assert_eq!(0., cache.distance(2, 2));
-        assert_eq!(10., cache.distance(3, 4));
-        assert_eq!(10., cache.distance(4, 3));
+        assert_eq!(6., cache.distance(&1, &3));
+        assert_eq!(6., cache.distance(&3, &1));
+        assert_eq!(0., cache.distance(&2, &2));
+        assert_eq!(10., cache.distance(&3, &4));
+        assert_eq!(10., cache.distance(&4, &3));
     }
 
     #[test]

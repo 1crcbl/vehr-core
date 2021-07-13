@@ -7,7 +7,7 @@ impl EucDistance {
     }
 }
 
-macro_rules! gen_new_mtx {
+macro_rules! gen_constructor {
     ($struct_name:ident) => {
         impl $struct_name {
             pub fn new(dim: usize, data: Vec<f64>) -> Self {
@@ -16,16 +16,19 @@ macro_rules! gen_new_mtx {
         }
     };
 }
+
+#[derive(Clone, Debug)]
 pub struct FullMtxDist {
     pub(crate) dim: usize,
     pub(crate) data: Vec<f64>,
 }
 
-gen_new_mtx!(FullMtxDist);
+gen_constructor!(FullMtxDist);
 
+#[derive(Clone, Debug)]
 pub struct LowerColDist {
     pub(crate) dim: usize,
     pub(crate) data: Vec<f64>,
 }
 
-gen_new_mtx!(LowerColDist);
+gen_constructor!(LowerColDist);
