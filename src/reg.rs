@@ -1,7 +1,7 @@
 use std::ptr::NonNull;
 
 use crate::{
-    data::{Node, NodeKind},
+    data::{MetaNode, Node, NodeKind},
     traits::{DistanceFunc, NodeIndex},
 };
 
@@ -9,7 +9,7 @@ pub struct NodeRegistry<M> {
     dim: usize,
     cache: DistanceCache,
     locations: Vec<f64>,
-    nodes: Vec<Node<M>>,
+    nodes: Vec<MetaNode<M>>,
 }
 
 impl<M> NodeRegistry<M> {
@@ -32,8 +32,8 @@ impl<M> NodeRegistry<M> {
     }
 
     #[inline]
-    pub fn cache(&self) -> DistanceCache {
-        self.cache.clone()
+    pub fn cache(&self) -> &DistanceCache {
+        &self.cache
     }
 
     #[inline]
@@ -47,26 +47,21 @@ impl<M> NodeRegistry<M> {
     }
 
     #[inline]
-    pub fn node<I>(&self, index: I) -> Option<&Node<M>>
+    pub fn node<I>(&self, index: I) -> Option<&MetaNode<M>>
     where
         I: NodeIndex,
     {
         self.nodes.get(index.index())
     }
 
-    pub fn add(
-        &mut self,
-        mut location: Vec<f64>,
-        kind: NodeKind,
-        demand: f64,
-        metadata: M,
-    ) -> Node<M>
+    pub fn add(&mut self, mut location: Vec<f64>, kind: NodeKind, demand: f64, metadata: M) -> Node
     where
         M: Clone,
     {
         let index = self.nodes.len();
-        let node = Node::new(index, kind, demand, metadata);
-        self.nodes.push(node.clone());
+        let mn = MetaNode::new(index, kind, demand, metadata);
+        let node = mn.node();
+        self.nodes.push(mn);
         self.locations.append(&mut location);
         node
     }
@@ -108,7 +103,7 @@ impl<M> NodeRegistry<M> {
 
 #[derive(Clone, Debug)]
 pub struct DistanceCache {
-    inner: NonNull<InnerCache>,
+    inner: Option<NonNull<InnerCache>>,
 }
 
 impl DistanceCache {
@@ -116,7 +111,7 @@ impl DistanceCache {
         let inner = Box::new(InnerCache { dim, distances });
 
         Self {
-            inner: NonNull::new(Box::leak(inner)).unwrap(),
+            inner: NonNull::new(Box::leak(inner)),
         }
     }
 
@@ -124,29 +119,34 @@ impl DistanceCache {
     where
         I: NodeIndex,
     {
-        unsafe {
-            let dim = self.inner.as_ref().dim;
-            if a.index() < dim && b.index() < dim {
-                let index = a.index() * dim + b.index();
-                self.inner.as_ref().distances[index]
-            } else {
-                0.
-            }
+        match self.inner {
+            Some(inner) => unsafe {
+                let dim = inner.as_ref().dim;
+                if a.index() < dim && b.index() < dim {
+                    let index = a.index() * dim + b.index();
+                    inner.as_ref().distances[index]
+                } else {
+                    0.
+                }
+            },
+            None => panic!("Distance matrix is either uninitialised or already dropped."),
         }
     }
 }
 
 impl Default for DistanceCache {
     fn default() -> Self {
-        Self {
-            inner: NonNull::dangling(),
-        }
+        Self { inner: None }
     }
 }
 
 impl Drop for DistanceCache {
     fn drop(&mut self) {
-        todo!()
+        if let Some(ptr) = std::mem::take(&mut self.inner) {
+            unsafe {
+                let _ = Box::from_raw(ptr.as_ptr());
+            }
+        }
     }
 }
 
@@ -158,7 +158,7 @@ struct InnerCache {
 
 #[cfg(test)]
 mod tests {
-    use crate::traits::LowerColDist;
+    use crate::distance::LowerColDist;
 
     use super::NodeRegistry;
 

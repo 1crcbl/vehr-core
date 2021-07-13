@@ -1,4 +1,7 @@
-use crate::data::Node;
+use crate::{
+    data::{MetaNode, Node},
+    distance::{EucDistance, FullMtxDist, LowerColDist},
+};
 
 pub trait NodeIndex {
     fn index(&self) -> usize;
@@ -10,7 +13,13 @@ impl NodeIndex for usize {
     }
 }
 
-impl<M> NodeIndex for Node<M> {
+impl NodeIndex for Node {
+    fn index(&self) -> usize {
+        self.get_index()
+    }
+}
+
+impl<M> NodeIndex for MetaNode<M> {
     fn index(&self) -> usize {
         self.get_index()
     }
@@ -18,15 +27,6 @@ impl<M> NodeIndex for Node<M> {
 
 pub trait DistanceFunc {
     fn compute(&self, index_a: usize, a: &[f64], index_b: usize, b: &[f64]) -> f64;
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Hash)]
-pub struct EucDistance {}
-
-impl EucDistance {
-    pub fn new() -> Self {
-        Self {}
-    }
 }
 
 impl DistanceFunc for EucDistance {
@@ -38,23 +38,6 @@ impl DistanceFunc for EucDistance {
     }
 }
 
-macro_rules! gen_new_mtx {
-    ($struct_name:ident) => {
-        impl $struct_name {
-            pub fn new(dim: usize, data: Vec<f64>) -> Self {
-                Self { dim, data }
-            }
-        }
-    };
-}
-
-pub struct FullMtxDist {
-    dim: usize,
-    data: Vec<f64>,
-}
-
-gen_new_mtx!(FullMtxDist);
-
 impl DistanceFunc for FullMtxDist {
     fn compute(&self, index_a: usize, _: &[f64], index_b: usize, _: &[f64]) -> f64 {
         if index_a >= self.dim || index_b >= self.dim {
@@ -64,13 +47,6 @@ impl DistanceFunc for FullMtxDist {
         }
     }
 }
-
-pub struct LowerColDist {
-    dim: usize,
-    data: Vec<f64>,
-}
-
-gen_new_mtx!(LowerColDist);
 
 impl DistanceFunc for LowerColDist {
     fn compute(&self, index_a: usize, _: &[f64], index_b: usize, _: &[f64]) -> f64 {
