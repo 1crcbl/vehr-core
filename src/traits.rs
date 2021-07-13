@@ -1,6 +1,6 @@
 use crate::{
-    data::{MetaNode, Node},
     distance::{EucDistance, FullMtxDist, LowerColDist},
+    tour::{MetaNode, Node},
 };
 
 pub trait NodeIndex {

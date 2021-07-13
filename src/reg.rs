@@ -1,10 +1,11 @@
 use std::ptr::NonNull;
 
 use crate::{
-    data::{MetaNode, Node, NodeKind},
+    tour::{MetaNode, Node, NodeKind},
     traits::{DistanceFunc, NodeIndex},
 };
 
+#[derive(Clone, Debug)]
 pub struct NodeRegistry<M> {
     dim: usize,
     cache: DistanceCache,
@@ -73,7 +74,13 @@ impl<M> NodeRegistry<M> {
         F: DistanceFunc,
     {
         let len = self.nodes.len();
-        let mut dist = vec![0.; len * len];
+        let len2 = len * len;
+        let mut dist = vec![0.; len2];
+        let mut nearest = Vec::with_capacity(len2);
+
+        (0..len).for_each(|_| {
+            nearest.append(&mut (0..len).collect());
+        });
 
         if self.locations.is_empty() {
             (0..len).for_each(|id1| {
@@ -97,7 +104,23 @@ impl<M> NodeRegistry<M> {
                 });
         }
 
-        self.cache = DistanceCache::new(len, dist);
+        (0..len).for_each(|id1| {
+            let left = id1 * len;
+            let right = left + len;
+
+            nearest[left..right].sort_by(|ii, jj| {
+                if *ii == *jj {
+                    std::cmp::Ordering::Equal
+                } else {
+                    let pos_x1 = id1 * len;
+                    let d_ii = dist[pos_x1 + *ii];
+                    let d_jj = dist[pos_x1 + *jj];
+                    d_ii.partial_cmp(&d_jj).unwrap()
+                }
+            });
+        });
+
+        self.cache = DistanceCache::new(len, dist, nearest);
     }
 }
 
@@ -107,8 +130,12 @@ pub struct DistanceCache {
 }
 
 impl DistanceCache {
-    pub fn new(dim: usize, distances: Vec<f64>) -> Self {
-        let inner = Box::new(InnerCache { dim, distances });
+    pub fn new(len: usize, distances: Vec<f64>, nearest_nb: Vec<usize>) -> Self {
+        let inner = Box::new(InnerCache {
+            len,
+            distances,
+            nearest_nb,
+        });
 
         Self {
             inner: NonNull::new(Box::leak(inner)),
@@ -121,12 +148,31 @@ impl DistanceCache {
     {
         match self.inner {
             Some(inner) => unsafe {
-                let dim = inner.as_ref().dim;
-                if a.index() < dim && b.index() < dim {
-                    let index = a.index() * dim + b.index();
+                let len = inner.as_ref().len;
+                if a.index() < len && b.index() < len {
+                    let index = a.index() * len + b.index();
                     inner.as_ref().distances[index]
                 } else {
                     0.
+                }
+            },
+            None => panic!("Distance matrix is either uninitialised or already dropped."),
+        }
+    }
+
+    pub fn nearest<I>(&self, a: I) -> &[usize]
+    where
+        I: NodeIndex,
+    {
+        match self.inner {
+            Some(inner) => unsafe {
+                let len = inner.as_ref().len;
+                if a.index() < inner.as_ref().len {
+                    let left = a.index() * len;
+                    let right = left + len;
+                    &inner.as_ref().nearest_nb[left..right]
+                } else {
+                    &[]
                 }
             },
             None => panic!("Distance matrix is either uninitialised or already dropped."),
@@ -152,8 +198,9 @@ impl Drop for DistanceCache {
 
 #[derive(Clone, Debug)]
 struct InnerCache {
-    dim: usize,
+    len: usize,
     distances: Vec<f64>,
+    nearest_nb: Vec<usize>,
 }
 
 #[cfg(test)]
@@ -165,11 +212,11 @@ mod tests {
     #[test]
     fn test_distance() {
         let mut node_reg = NodeRegistry::<()>::new(5);
-        node_reg.add(vec![0.; 0], crate::data::NodeKind::Request, 10., ());
-        node_reg.add(vec![0.; 0], crate::data::NodeKind::Request, 10., ());
-        node_reg.add(vec![0.; 0], crate::data::NodeKind::Request, 10., ());
-        node_reg.add(vec![0.; 0], crate::data::NodeKind::Request, 10., ());
-        node_reg.add(vec![0.; 0], crate::data::NodeKind::Request, 10., ());
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
 
         let data = vec![1., 2., 3., 4., 5., 6., 7., 8., 9., 10.];
         let lrd = LowerColDist::new(5, data);
@@ -182,5 +229,27 @@ mod tests {
         assert_eq!(0., cache.distance(2, 2));
         assert_eq!(10., cache.distance(3, 4));
         assert_eq!(10., cache.distance(4, 3));
+    }
+
+    #[test]
+    fn test_nearest() {
+        let mut node_reg = NodeRegistry::<()>::new(5);
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
+
+        let data = vec![9., 6., 4., 7., 2., 3., 1., 8., 4., 7.];
+        let lrd = LowerColDist::new(5, data);
+
+        node_reg.compute(&lrd);
+        let cache = node_reg.cache();
+
+        assert_eq!(&vec![0, 3, 2, 4, 1], cache.nearest(0));
+        assert_eq!(&vec![1, 4, 2, 3, 0], cache.nearest(1));
+        assert_eq!(&vec![2, 1, 4, 0, 3], cache.nearest(2));
+        assert_eq!(&vec![3, 1, 0, 4, 2], cache.nearest(3));
+        assert_eq!(&vec![4, 1, 2, 0, 3], cache.nearest(4));
     }
 }

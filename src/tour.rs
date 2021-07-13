@@ -1,5 +1,7 @@
 use std::ptr::NonNull;
 
+use crate::reg::NodeRegistry;
+
 // TODO: impl Drop for all Inner structs.
 
 macro_rules! panic_ptr {
@@ -8,6 +10,7 @@ macro_rules! panic_ptr {
     };
 }
 
+#[derive(Clone, Debug)]
 pub struct MetaNode<M> {
     data: Node,
     meta: M,
@@ -264,6 +267,23 @@ impl Drop for Route {
         }
         self.inner = None;
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct Tour<M> {
+    reg: NodeRegistry<M>,
+    route: Vec<Route>,
+}
+
+impl<M> Tour<M> {
+    pub fn new(reg: NodeRegistry<M>) -> Self {
+        Self {
+            reg,
+            route: Vec::with_capacity(0),
+        }
+    }
+
+    pub fn init_cw(&mut self) {}
 }
 
 #[derive(Clone, Debug)]
