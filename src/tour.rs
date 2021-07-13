@@ -257,10 +257,21 @@ impl Route {
         }
     }
 
+    /// Moves all nodes from `other` into the front of `Self`, taking into account the traversal direction.
+    pub fn append_front(&mut self, _other: &mut Self) {
+        todo!()
+    }
+
+    /// Inserts a node at the end of the route.
+    #[inline]
     pub fn push_back(&mut self, node: &Node) {
-        match (self.inner, node.inner) {
+        Self::push_back_(&self.inner, node);
+    }
+
+    fn push_back_(route: &Option<NonNull<InnerRoute>>, node: &Node) {
+        match (route, node.inner) {
             (Some(inner), Some(node_inner)) => unsafe {
-                (*node_inner.as_ptr()).route = self.inner;
+                (*node_inner.as_ptr()).route = *route;
 
                 if inner.as_ref().first.is_none() {
                     (*inner.as_ptr()).first = node.inner;
@@ -282,6 +293,37 @@ impl Route {
         };
     }
 
+    /// Inserts a node at the beginning of the route.
+    #[inline]
+    pub fn push_front(&mut self, node: &Node) {
+        Self::push_front_(&self.inner, node);
+    }
+
+    fn push_front_(route: &Option<NonNull<InnerRoute>>, node: &Node) {
+        match (route, node.inner) {
+            (Some(inner), Some(node_inner)) => unsafe {
+                (*node_inner.as_ptr()).route = *route;
+
+                if inner.as_ref().first.is_none() {
+                    (*inner.as_ptr()).first = node.inner;
+                    (*inner.as_ptr()).last = node.inner;
+                } else if inner.as_ref().rev {
+                    (*node_inner.as_ptr()).predecessor = inner.as_ref().last;
+                    (*inner.as_ref().last.unwrap().as_ptr()).successor = node.inner;
+                    (*inner.as_ptr()).last = node.inner;
+                } else {
+                    (*node_inner.as_ptr()).successor = inner.as_ref().first;
+                    (*inner.as_ref().first.unwrap().as_ptr()).predecessor = node.inner;
+                    (*inner.as_ptr()).first = node.inner;
+                }
+
+                (*inner.as_ptr()).load += node_inner.as_ref().demand;
+                (*inner.as_ptr()).n_nodes += 1;
+            },
+            _ => panic_ptr!("Node or route"),
+        };
+    }
+
     pub fn index_vec(&self) -> Vec<usize> {
         match self.inner {
             Some(inner) => unsafe {
@@ -290,7 +332,7 @@ impl Route {
                 if let Some(x) = inner.as_ref().depot {
                     result.push(x.as_ref().index)
                 }
-                
+
                 let rev = inner.as_ref().rev;
 
                 let mut node = if rev {
@@ -484,5 +526,30 @@ mod tests {
 
         route.rev(false);
         assert_eq!(&vec![0, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5], &route.index_vec());
+    }
+
+    #[test]
+    fn test_push_front() {
+        let depot = Node::new(0, NodeKind::Depot, 0.);
+        let mut route = Route::new(&depot, 1000.);
+
+        let nodes: Vec<_> = (1..=10)
+            .map(|ii| Node::new(ii, NodeKind::Request, 10.))
+            .collect();
+        nodes.iter().take(5).for_each(|node| route.push_front(node));
+        route.rev(true);
+        nodes
+            .iter()
+            .rev()
+            .take(5)
+            .for_each(|node| route.push_front(node));
+
+        assert_eq!(100., route.load());
+        assert_eq!(11, route.n_nodes());
+
+        assert_eq!(&vec![0, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5], &route.index_vec());
+
+        route.rev(false);
+        assert_eq!(&vec![0, 5, 4, 3, 2, 1, 10, 9, 8, 7, 6], &route.index_vec());
     }
 }
