@@ -1,4 +1,4 @@
-use std::{collections::HashSet, ptr::NonNull};
+use std::{collections::HashSet, rc::Rc};
 
 use crate::{
     tour::{Node, NodeKind},
@@ -173,47 +173,36 @@ impl Drop for NodeRegistry {
                     Box::from_raw(inner.as_ptr());
                 }
             }
-
-            if let Some(ptr) = std::mem::take(&mut self.cache.inner) {
-                let _ = Box::from_raw(ptr.as_ptr());
-            }
         }
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct DistanceCache {
-    inner: Option<NonNull<InnerCache>>,
+    inner: Rc<InnerCache>,
 }
 
 impl DistanceCache {
     pub(super) fn new(len: usize, distances: Vec<f64>, nearest_nb: Vec<usize>) -> Self {
-        let inner = Box::new(InnerCache {
+        let inner = Rc::new(InnerCache {
             len,
             distances,
             nearest_nb,
         });
 
-        Self {
-            inner: NonNull::new(Box::leak(inner)),
-        }
+        Self { inner }
     }
 
     pub fn distance<I>(&self, a: &I, b: &I) -> f64
     where
         I: NodeIndex,
     {
-        match self.inner {
-            Some(inner) => unsafe {
-                let len = inner.as_ref().len;
-                if a.index() < len && b.index() < len {
-                    let index = a.index() * len + b.index();
-                    inner.as_ref().distances[index]
-                } else {
-                    0.
-                }
-            },
-            None => panic!("Distance matrix is either uninitialised or already dropped."),
+        let len = self.inner.len;
+        if a.index() < len && b.index() < len {
+            let index = a.index() * len + b.index();
+            self.inner.distances[index]
+        } else {
+            0.
         }
     }
 
@@ -221,25 +210,22 @@ impl DistanceCache {
     where
         I: NodeIndex,
     {
-        match self.inner {
-            Some(inner) => unsafe {
-                let len = inner.as_ref().len;
-                if a.index() < inner.as_ref().len {
-                    let left = a.index() * len;
-                    let right = left + len;
-                    &inner.as_ref().nearest_nb[left..right]
-                } else {
-                    &[]
-                }
-            },
-            None => panic!("Distance matrix is either uninitialised or already dropped."),
+        let len = self.inner.len;
+        if a.index() < self.inner.len {
+            let left = a.index() * len;
+            let right = left + len;
+            &self.inner.nearest_nb[left..right]
+        } else {
+            &[]
         }
     }
 }
 
 impl Default for DistanceCache {
     fn default() -> Self {
-        Self { inner: None }
+        Self {
+            inner: Rc::new(InnerCache::default()),
+        }
     }
 }
 
@@ -248,6 +234,16 @@ struct InnerCache {
     len: usize,
     distances: Vec<f64>,
     nearest_nb: Vec<usize>,
+}
+
+impl Default for InnerCache {
+    fn default() -> Self {
+        Self {
+            len: 0,
+            distances: Vec::with_capacity(0),
+            nearest_nb: Vec::with_capacity(0),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

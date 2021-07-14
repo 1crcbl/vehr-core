@@ -1,6 +1,6 @@
 use std::{collections::BinaryHeap, ptr::NonNull};
 
-use crate::reg::NodeRegistry;
+use crate::reg::{DistanceCache, NodeRegistry};
 
 macro_rules! panic_ptr {
     ($name:expr) => {
@@ -136,7 +136,7 @@ pub struct Route {
 }
 
 impl Route {
-    pub fn new<N>(depot: N, vehicle_capacity: f64) -> Self
+    pub fn new<N>(depot: N, vehicle_capacity: f64, cache: &DistanceCache) -> Self
     where
         N: AsRef<Node>,
     {
@@ -147,6 +147,7 @@ impl Route {
             depot: depot.as_ref().inner,
             first: None,
             last: None,
+            cache: cache.clone(),
             rev: false,
         });
 
@@ -473,6 +474,33 @@ impl Route {
         }
     }
 
+    pub fn total_distance(&self) -> f64 {
+        let mut result = 0.;
+
+        if let Some(inner) = self.inner {
+            unsafe {
+                let depot_idx = inner.as_ref().depot.unwrap().as_ref().index;
+
+                let mut node1 = inner.as_ref().depot;
+                let mut node2 = inner.as_ref().first;
+
+                let cache = &inner.as_ref().cache;
+
+                while let (Some(inner1), Some(inner2)) = (node1, node2) {
+                    result += cache.distance(&inner1.as_ref().index, &inner2.as_ref().index);
+                    if inner2.as_ref().successor.is_none() {
+                        result += cache.distance(&inner2.as_ref().index, &depot_idx);
+                    }
+
+                    node1 = node2;
+                    node2 = inner2.as_ref().successor;
+                }
+            }
+        }
+
+        result
+    }
+
     pub fn index_vec(&self) -> Vec<usize> {
         match self.inner {
             Some(inner) => unsafe {
@@ -532,6 +560,7 @@ pub(crate) struct InnerRoute {
     depot: Option<NonNull<InnerNode>>,
     first: Option<NonNull<InnerNode>>,
     last: Option<NonNull<InnerNode>>,
+    cache: DistanceCache,
     rev: bool,
 }
 
@@ -580,6 +609,13 @@ impl Tour {
         tmp.into_iter().flatten().collect()
     }
 
+    #[inline]
+    pub fn total_distance(&self) -> f64 {
+        self.routes
+            .iter()
+            .fold(0., |acc, x| acc + x.total_distance())
+    }
+
     /// Initialises the tour by using the Clarke-Wright savings algorithm.
     pub fn init_cw(&mut self) {
         let depot = self.reg.depot().expect("There must be at least one depot.");
@@ -591,7 +627,7 @@ impl Tour {
 
         for node1 in self.reg.node_iter() {
             if node1.kind() != NodeKind::Depot {
-                let mut r = Route::new(depot, self.vehicle_capacity);
+                let mut r = Route::new(depot, self.vehicle_capacity, self.reg.cache());
                 r.push_back(&node1);
                 routes.push(r);
             }
@@ -699,9 +735,11 @@ impl<'s> Ord for SavingPair<'s> {
 
 #[cfg(test)]
 mod tests {
+    use approx::assert_relative_eq;
+
     use crate::{
         distance::LowerColDist,
-        reg::{NodeRegistry, TourSet},
+        reg::{DistanceCache, NodeRegistry, TourSet},
         tour::Tour,
     };
 
@@ -710,7 +748,7 @@ mod tests {
     #[test]
     fn test_push_back() {
         let depot = Node::new(0, NodeKind::Depot, 0.);
-        let mut route = Route::new(&depot, 1000.);
+        let mut route = Route::new(&depot, 1000., &DistanceCache::default());
 
         let nodes: Vec<_> = (1..=10)
             .map(|ii| Node::new(ii, NodeKind::Request, 10.))
@@ -735,7 +773,7 @@ mod tests {
     #[test]
     fn test_push_front() {
         let depot = Node::new(0, NodeKind::Depot, 0.);
-        let mut route = Route::new(&depot, 1000.);
+        let mut route = Route::new(&depot, 1000., &DistanceCache::default());
 
         let nodes: Vec<_> = (1..=10)
             .map(|ii| Node::new(ii, NodeKind::Request, 10.))
@@ -760,7 +798,7 @@ mod tests {
     #[test]
     fn test_append_back() {
         let depot = Node::new(0, NodeKind::Depot, 0.);
-        let mut route1 = Route::new(&depot, 1000.);
+        let mut route1 = Route::new(&depot, 1000., &DistanceCache::default());
         let nodes: Vec<_> = (1..=10)
             .map(|ii| Node::new(ii, NodeKind::Request, 10.))
             .collect();
@@ -769,7 +807,7 @@ mod tests {
             .take(5)
             .for_each(|node| route1.push_front(node));
 
-        let mut route2 = Route::new(&depot, 1000.);
+        let mut route2 = Route::new(&depot, 1000., &DistanceCache::default());
         nodes
             .iter()
             .rev()
@@ -783,7 +821,7 @@ mod tests {
     #[test]
     fn test_append_front() {
         let depot = Node::new(0, NodeKind::Depot, 0.);
-        let mut route1 = Route::new(&depot, 1000.);
+        let mut route1 = Route::new(&depot, 1000., &DistanceCache::default());
         let nodes: Vec<_> = (1..=10)
             .map(|ii| Node::new(ii, NodeKind::Request, 10.))
             .collect();
@@ -792,7 +830,7 @@ mod tests {
             .take(5)
             .for_each(|node| route1.push_front(node));
 
-        let mut route2 = Route::new(&depot, 1000.);
+        let mut route2 = Route::new(&depot, 1000., &DistanceCache::default());
         nodes
             .iter()
             .rev()
@@ -806,7 +844,7 @@ mod tests {
     #[test]
     fn test_pop_back() {
         let depot = Node::new(0, NodeKind::Depot, 0.);
-        let mut route = Route::new(&depot, 1000.);
+        let mut route = Route::new(&depot, 1000., &DistanceCache::default());
 
         let nodes: Vec<_> = (1..=2)
             .map(|ii| Node::new(ii, NodeKind::Request, 10.))
@@ -827,7 +865,7 @@ mod tests {
     #[test]
     fn test_pop_front() {
         let depot = Node::new(0, NodeKind::Depot, 0.);
-        let mut route = Route::new(&depot, 1000.);
+        let mut route = Route::new(&depot, 1000., &DistanceCache::default());
 
         let nodes: Vec<_> = (1..=2)
             .map(|ii| Node::new(ii, NodeKind::Request, 10.))
@@ -884,12 +922,14 @@ mod tests {
         let mut tourset = TourSet::new();
         tourset.insert(vec![0, 1, 7, 6, 0, 2, 5, 0, 3, 4]);
         assert!(tourset.contains(&tour.route_vec_sorted()));
+
+        assert_relative_eq!(39.04, tour.total_distance());
     }
 
     #[test]
     fn test_eject() {
         let depot = Node::new(0, NodeKind::Depot, 0.);
-        let mut route = Route::new(&depot, 1000.);
+        let mut route = Route::new(&depot, 1000., &DistanceCache::default());
 
         let mut nodes: Vec<_> = (1..=10)
             .map(|ii| Node::new(ii, NodeKind::Request, 10.))
