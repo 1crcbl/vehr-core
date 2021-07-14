@@ -1,20 +1,20 @@
 use std::{collections::HashSet, ptr::NonNull};
 
 use crate::{
-    tour::{MetaNode, Node, NodeKind},
+    tour::{Node, NodeKind},
     traits::{DistanceFunc, NodeIndex},
 };
 
 #[derive(Clone, Debug)]
-pub struct NodeRegistry<M> {
+pub struct NodeRegistry {
     dim: usize,
     cache: DistanceCache,
     locations: Vec<f64>,
-    nodes: Vec<MetaNode<M>>,
+    nodes: Vec<Node>,
     depots: HashSet<usize>,
 }
 
-impl<M> NodeRegistry<M> {
+impl NodeRegistry {
     pub fn new(dim: usize) -> Self {
         Self {
             dim,
@@ -61,7 +61,7 @@ impl<M> NodeRegistry<M> {
     }
 
     #[inline]
-    pub fn node<I>(&self, index: I) -> Option<&MetaNode<M>>
+    pub fn node<I>(&self, index: I) -> Option<&Node>
     where
         I: NodeIndex,
     {
@@ -69,21 +69,17 @@ impl<M> NodeRegistry<M> {
     }
 
     #[inline]
-    pub fn depot(&self) -> Option<&MetaNode<M>> {
+    pub fn depot(&self) -> Option<&Node> {
         match self.depots.iter().take(1).next() {
             Some(id) => self.nodes.get(*id),
             None => None,
         }
     }
 
-    pub fn add(&mut self, mut location: Vec<f64>, kind: NodeKind, demand: f64, metadata: M) -> Node
-    where
-        M: Clone,
-    {
+    pub fn add(&mut self, mut location: Vec<f64>, kind: NodeKind, demand: f64) -> Node {
         let index = self.nodes.len();
-        let mn = MetaNode::new(index, kind, demand, metadata);
-        let node = mn.node().clone();
-        self.nodes.push(mn);
+        let node = Node::new(index, kind, demand);
+        self.nodes.push(node.clone());
         self.locations.append(&mut location);
 
         if kind == NodeKind::Depot {
@@ -93,11 +89,11 @@ impl<M> NodeRegistry<M> {
         node
     }
 
-    pub fn node_iter(&self) -> std::slice::Iter<MetaNode<M>> {
+    pub fn node_iter(&self) -> std::slice::Iter<Node> {
         self.nodes.iter()
     }
 
-    pub fn node_iter_mut(&mut self) -> std::slice::IterMut<MetaNode<M>> {
+    pub fn node_iter_mut(&mut self) -> std::slice::IterMut<Node> {
         self.nodes.iter_mut()
     }
 
@@ -158,11 +154,10 @@ impl<M> NodeRegistry<M> {
     }
 }
 
-impl<M> Drop for NodeRegistry<M> {
+impl Drop for NodeRegistry {
     fn drop(&mut self) {
         unsafe {
-            for node in self.nodes.drain(..) {
-                let (mut node, _) = node.into_value();
+            for mut node in self.nodes.drain(..) {
                 if let Some(inner) = std::mem::take(&mut node.inner) {
                     (*inner.as_ptr()).route = None;
                     (*inner.as_ptr()).predecessor = None;
@@ -280,12 +275,12 @@ mod tests {
 
     #[test]
     fn test_distance() {
-        let mut node_reg = NodeRegistry::<()>::new(5);
-        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
-        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
-        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
-        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
-        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
+        let mut node_reg = NodeRegistry::new(5);
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10.);
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10.);
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10.);
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10.);
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10.);
 
         let data = vec![1., 2., 3., 4., 5., 6., 7., 8., 9., 10.];
         let lrd = LowerColDist::new(5, data);
@@ -302,12 +297,12 @@ mod tests {
 
     #[test]
     fn test_nearest() {
-        let mut node_reg = NodeRegistry::<()>::new(5);
-        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
-        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
-        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
-        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
-        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10., ());
+        let mut node_reg = NodeRegistry::new(5);
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10.);
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10.);
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10.);
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10.);
+        node_reg.add(vec![0.; 0], crate::tour::NodeKind::Request, 10.);
 
         let data = vec![9., 6., 4., 7., 2., 3., 1., 8., 4., 7.];
         let lrd = LowerColDist::new(5, data);

@@ -2,63 +2,10 @@ use std::{collections::BinaryHeap, ptr::NonNull};
 
 use crate::reg::NodeRegistry;
 
-// TODO: impl Drop for all Inner structs.
-
 macro_rules! panic_ptr {
     ($name:expr) => {
         panic!("{} is either uninitialised or already dropped.", $name);
     };
-}
-
-#[derive(Clone, Debug)]
-pub struct MetaNode<M> {
-    data: Node,
-    meta: M,
-}
-
-impl<M> MetaNode<M> {
-    pub(crate) fn new(index: usize, kind: NodeKind, demand: f64, meta: M) -> Self {
-        let data = Node::new(index, kind, demand);
-        Self { data, meta }
-    }
-
-    #[inline]
-    pub(crate) fn get_index(&self) -> usize {
-        self.data.get_index()
-    }
-
-    #[inline]
-    pub fn node(&self) -> &Node {
-        &self.data
-    }
-
-    #[inline]
-    pub fn metadata(&self) -> &M {
-        &self.meta
-    }
-
-    #[inline]
-    pub(crate) fn into_value(self) -> (Node, M) {
-        (self.data, self.meta)
-    }
-}
-
-impl<M> AsRef<Node> for MetaNode<M> {
-    fn as_ref(&self) -> &Node {
-        &self.data
-    }
-}
-
-impl<M> AsMut<Node> for MetaNode<M> {
-    fn as_mut(&mut self) -> &mut Node {
-        &mut self.data
-    }
-}
-
-impl<M> PartialEq for MetaNode<M> {
-    fn eq(&self, other: &Self) -> bool {
-        self.data == other.data
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -569,14 +516,14 @@ pub(crate) struct InnerRoute {
 }
 
 #[derive(Clone, Debug)]
-pub struct Tour<M> {
+pub struct Tour {
     vehicle_capacity: f64,
-    reg: NodeRegistry<M>,
+    reg: NodeRegistry,
     routes: Vec<Route>,
 }
 
-impl<M> Tour<M> {
-    pub fn new(reg: NodeRegistry<M>, vehicle_capacity: f64) -> Self {
+impl Tour {
+    pub fn new(reg: NodeRegistry, vehicle_capacity: f64) -> Self {
         Self {
             vehicle_capacity,
             reg,
@@ -604,21 +551,20 @@ impl<M> Tour<M> {
         let mut bh = BinaryHeap::with_capacity(len * len);
         let cache = self.reg.cache();
 
-        for mn1 in self.reg.node_iter() {
-            let node = mn1.node();
-            if node.kind() != NodeKind::Depot {
+        for node1 in self.reg.node_iter() {
+            if node1.kind() != NodeKind::Depot {
                 let mut r = Route::new(depot, self.vehicle_capacity);
-                r.push_back(&node);
+                r.push_back(&node1);
                 routes.push(r);
             }
 
-            let d_depot1 = cache.distance(mn1, depot);
-            for mn2 in self.reg.node_iter() {
-                if mn1 != mn2 {
-                    let d_depot2 = cache.distance(mn2, depot);
-                    let d_12 = cache.distance(mn1, mn2);
+            let d_depot1 = cache.distance(node1, depot);
+            for node2 in self.reg.node_iter() {
+                if node1 != node2 {
+                    let d_depot2 = cache.distance(node2, depot);
+                    let d_12 = cache.distance(node1, node2);
                     let saving = d_depot1 + d_depot2 - d_12;
-                    bh.push(SavingPair::new(mn1.node(), mn2.node(), saving));
+                    bh.push(SavingPair::new(node1, node2, saving));
                 }
             }
         }
@@ -879,15 +825,15 @@ mod tests {
 
         let lcd = LowerColDist::new(8, dist_mtx);
 
-        let mut reg = NodeRegistry::<()>::new(8);
-        reg.add(vec![0.; 0], NodeKind::Depot, 0., ());
-        reg.add(vec![0.; 0], NodeKind::Request, 12., ());
-        reg.add(vec![0.; 0], NodeKind::Request, 12., ());
-        reg.add(vec![0.; 0], NodeKind::Request, 6., ());
-        reg.add(vec![0.; 0], NodeKind::Request, 16., ());
-        reg.add(vec![0.; 0], NodeKind::Request, 15., ());
-        reg.add(vec![0.; 0], NodeKind::Request, 10., ());
-        reg.add(vec![0.; 0], NodeKind::Request, 8., ());
+        let mut reg = NodeRegistry::new(8);
+        reg.add(vec![0.; 0], NodeKind::Depot, 0.);
+        reg.add(vec![0.; 0], NodeKind::Request, 12.);
+        reg.add(vec![0.; 0], NodeKind::Request, 12.);
+        reg.add(vec![0.; 0], NodeKind::Request, 6.);
+        reg.add(vec![0.; 0], NodeKind::Request, 16.);
+        reg.add(vec![0.; 0], NodeKind::Request, 15.);
+        reg.add(vec![0.; 0], NodeKind::Request, 10.);
+        reg.add(vec![0.; 0], NodeKind::Request, 8.);
 
         reg.compute(&lcd);
 

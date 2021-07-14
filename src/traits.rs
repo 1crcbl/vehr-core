@@ -1,6 +1,6 @@
 use crate::{
     distance::{EucDistance, FullMtxDist, LowerColDist},
-    tour::{MetaNode, Node},
+    tour::Node,
 };
 
 pub trait NodeIndex {
@@ -14,12 +14,6 @@ impl NodeIndex for usize {
 }
 
 impl NodeIndex for Node {
-    fn index(&self) -> usize {
-        self.get_index()
-    }
-}
-
-impl<M> NodeIndex for MetaNode<M> {
     fn index(&self) -> usize {
         self.get_index()
     }
