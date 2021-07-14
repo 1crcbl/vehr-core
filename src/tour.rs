@@ -453,6 +453,26 @@ impl Route {
         }
     }
 
+    pub fn eject(node: &mut Node) {
+        if let Some(inner) = node.inner {
+            unsafe {
+                if let Some(route) = inner.as_ref().route {
+                    if let Some(pred) = inner.as_ref().predecessor {
+                        (*pred.as_ptr()).successor = inner.as_ref().successor;
+                    } else {
+                        (*route.as_ptr()).first = inner.as_ref().successor;
+                    }
+
+                    if let Some(succ) = inner.as_ref().successor {
+                        (*succ.as_ptr()).predecessor = inner.as_ref().predecessor;
+                    } else {
+                        (*route.as_ptr()).last = inner.as_ref().predecessor;
+                    }
+                }
+            }
+        }
+    }
+
     pub fn index_vec(&self) -> Vec<usize> {
         match self.inner {
             Some(inner) => unsafe {
@@ -523,12 +543,29 @@ pub struct Tour {
 }
 
 impl Tour {
+    /// Create a new instance of `Tour`.
     pub fn new(reg: NodeRegistry, vehicle_capacity: f64) -> Self {
         Self {
             vehicle_capacity,
             reg,
             routes: Vec::with_capacity(0),
         }
+    }
+
+    /// Returns the number of nodes.
+    #[inline]
+    pub fn n_nodes(&self) -> usize {
+        self.reg.len()
+    }
+
+    #[inline]
+    pub fn node(&self, index: usize) -> Option<&Node> {
+        self.reg.node(index)
+    }
+
+    #[inline]
+    pub fn node_mut(&mut self, index: usize) -> Option<&mut Node> {
+        self.reg.node_mut(index)
     }
 
     #[inline]
@@ -543,6 +580,7 @@ impl Tour {
         tmp.into_iter().flatten().collect()
     }
 
+    /// Initialises the tour by using the Clarke-Wright savings algorithm.
     pub fn init_cw(&mut self) {
         let depot = self.reg.depot().expect("There must be at least one depot.");
         let len = self.reg.len();
@@ -846,5 +884,31 @@ mod tests {
         let mut tourset = TourSet::new();
         tourset.insert(vec![0, 1, 7, 6, 0, 2, 5, 0, 3, 4]);
         assert!(tourset.contains(&tour.route_vec_sorted()));
+    }
+
+    #[test]
+    fn test_eject() {
+        let depot = Node::new(0, NodeKind::Depot, 0.);
+        let mut route = Route::new(&depot, 1000.);
+
+        let mut nodes: Vec<_> = (1..=10)
+            .map(|ii| Node::new(ii, NodeKind::Request, 10.))
+            .collect();
+        nodes.iter().take(5).for_each(|node| route.push_back(node));
+
+        Route::eject(nodes.get_mut(2).unwrap());
+        Route::eject(nodes.get_mut(4).unwrap());
+
+        route.rev(true);
+        nodes
+            .iter()
+            .rev()
+            .take(5)
+            .for_each(|node| route.push_back(node));
+
+        Route::eject(nodes.get_mut(5).unwrap());
+        Route::eject(nodes.get_mut(9).unwrap());
+
+        assert_eq!(&vec![0, 1, 9, 8, 7, 4, 2], &route.index_vec());
     }
 }

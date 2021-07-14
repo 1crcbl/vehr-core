@@ -69,6 +69,14 @@ impl NodeRegistry {
     }
 
     #[inline]
+    pub fn node_mut<I>(&mut self, index: I) -> Option<&mut Node>
+    where
+        I: NodeIndex,
+    {
+        self.nodes.get_mut(index.index())
+    }
+
+    #[inline]
     pub fn depot(&self) -> Option<&Node> {
         match self.depots.iter().take(1).next() {
             Some(id) => self.nodes.get(*id),
