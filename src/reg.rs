@@ -247,11 +247,36 @@ struct InnerCache {
     nearest_nb: Vec<usize>,
 }
 
+#[derive(Clone, Debug)]
+pub struct TourSet {
+    hs: HashSet<Vec<usize>>,
+}
+
+impl TourSet {
+    pub fn new() -> Self {
+        Self { hs: HashSet::new() }
+    }
+
+    pub fn insert(&mut self, tour: Vec<usize>) {
+        self.hs.insert(tour);
+    }
+
+    pub fn contains(&self, tour: &[usize]) -> bool {
+        self.hs.contains(tour)
+    }
+}
+
+impl Default for TourSet {
+    fn default() -> Self {
+        Self { hs: HashSet::new() }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::distance::LowerColDist;
 
-    use super::NodeRegistry;
+    use super::{NodeRegistry, TourSet};
 
     #[test]
     fn test_distance() {
@@ -295,5 +320,13 @@ mod tests {
         assert_eq!(&vec![2, 1, 4, 0, 3], cache.nearest(2));
         assert_eq!(&vec![3, 1, 0, 4, 2], cache.nearest(3));
         assert_eq!(&vec![4, 1, 2, 0, 3], cache.nearest(4));
+    }
+
+    #[test]
+    fn test_tourset() {
+        let mut tourset = TourSet::new();
+        tourset.insert(vec![0, 1, 2, 3, 0, 4, 5, 6]);
+        assert!(tourset.contains(&vec![0, 1, 2, 3, 0, 4, 5, 6]));
+        assert!(!tourset.contains(&vec![0, 1, 2, 4, 6, 0, 3, 5]));
     }
 }

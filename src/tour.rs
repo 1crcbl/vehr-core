@@ -511,10 +511,6 @@ impl Route {
             Some(inner) => unsafe {
                 let mut result = Vec::with_capacity(self.n_nodes());
 
-                if let Some(x) = inner.as_ref().depot {
-                    result.push(x.as_ref().index)
-                }
-
                 let rev = inner.as_ref().rev;
 
                 let mut node = if rev {
@@ -523,13 +519,28 @@ impl Route {
                     inner.as_ref().first
                 };
 
+                let mut min_node = std::usize::MAX;
+                let mut min_idx = 0;
+
                 while let Some(tmp) = node {
-                    result.push(tmp.as_ref().index);
+                    let idx = tmp.as_ref().index;
+
+                    if idx < min_node {
+                        min_node = idx;
+                        min_idx = result.len();
+                    }
+
+                    result.push(idx);
                     if rev {
                         node = tmp.as_ref().predecessor;
                     } else {
                         node = tmp.as_ref().successor;
                     }
+                }
+
+                result.rotate_left(min_idx);
+                if let Some(x) = inner.as_ref().depot {
+                    result.insert(0, x.as_ref().index);
                 }
 
                 result
@@ -578,6 +589,13 @@ impl<M> Tour<M> {
         self.routes.iter().map(|r| r.index_vec()).collect()
     }
 
+    #[inline]
+    pub fn route_vec_sorted(&self) -> Vec<usize> {
+        let mut tmp: Vec<_> = self.routes.iter().map(|r| r.index_vec()).collect();
+        tmp.sort_by(|a, b| a[1].cmp(&b[1]));
+        tmp.into_iter().flatten().collect()
+    }
+
     pub fn init_cw(&mut self) {
         let depot = self.reg.depot().expect("There must be at least one depot.");
         let len = self.reg.len();
@@ -612,15 +630,19 @@ impl<M> Tour<M> {
                 unsafe {
                     let mut route1 = node1.inner.as_ref().unwrap().as_ref().route;
                     let mut route2 = node2.inner.as_ref().unwrap().as_ref().route;
-                    
+
                     if Route::check_capacity_(&route1, &route2) {
                         match (node1.pos(), node2.pos()) {
                             (NodePos::First, NodePos::First) => {
                                 Route::rev_(&route2, true);
                                 Route::append_front_(&mut route1, &mut route2);
                             }
-                            (NodePos::First, NodePos::Last) => Route::append_front_(&mut route1, &mut route2),
-                            (NodePos::Last, NodePos::First) => Route::append_back_(&mut route1, &mut route2),
+                            (NodePos::First, NodePos::Last) => {
+                                Route::append_front_(&mut route1, &mut route2)
+                            }
+                            (NodePos::Last, NodePos::First) => {
+                                Route::append_back_(&mut route1, &mut route2)
+                            }
                             (NodePos::Last, NodePos::Last) => {
                                 Route::rev_(&route2, true);
                                 Route::append_back_(&mut route1, &mut route2);
@@ -693,7 +715,11 @@ impl<'s> Ord for SavingPair<'s> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{distance::LowerColDist, reg::NodeRegistry, tour::Tour};
+    use crate::{
+        distance::LowerColDist,
+        reg::{NodeRegistry, TourSet},
+        tour::Tour,
+    };
 
     use super::{Node, NodeKind, Route};
 
@@ -716,10 +742,10 @@ mod tests {
         assert_eq!(100., route.load());
         assert_eq!(11, route.n_nodes());
 
-        assert_eq!(&vec![0, 5, 4, 3, 2, 1, 10, 9, 8, 7, 6], &route.index_vec());
+        assert_eq!(&vec![0, 1, 10, 9, 8, 7, 6, 5, 4, 3, 2], &route.index_vec());
 
         route.rev(false);
-        assert_eq!(&vec![0, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5], &route.index_vec());
+        assert_eq!(&vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], &route.index_vec());
     }
 
     #[test]
@@ -741,10 +767,10 @@ mod tests {
         assert_eq!(100., route.load());
         assert_eq!(11, route.n_nodes());
 
-        assert_eq!(&vec![0, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5], &route.index_vec());
+        assert_eq!(&vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], &route.index_vec());
 
         route.rev(false);
-        assert_eq!(&vec![0, 5, 4, 3, 2, 1, 10, 9, 8, 7, 6], &route.index_vec());
+        assert_eq!(&vec![0, 1, 10, 9, 8, 7, 6, 5, 4, 3, 2], &route.index_vec());
     }
 
     #[test]
@@ -767,7 +793,7 @@ mod tests {
             .for_each(|node| route2.push_front(node));
 
         route1.append_back(&mut route2);
-        assert_eq!(&vec![0, 5, 4, 3, 2, 1, 6, 7, 8, 9, 10], &route1.index_vec());
+        assert_eq!(&vec![0, 1, 6, 7, 8, 9, 10, 5, 4, 3, 2], &route1.index_vec());
     }
 
     #[test]
@@ -790,7 +816,7 @@ mod tests {
             .for_each(|node| route2.push_front(node));
 
         route1.append_front(&mut route2);
-        assert_eq!(&vec![0, 6, 7, 8, 9, 10, 5, 4, 3, 2, 1], &route1.index_vec());
+        assert_eq!(&vec![0, 1, 6, 7, 8, 9, 10, 5, 4, 3, 2], &route1.index_vec());
     }
 
     #[test]
@@ -870,5 +896,9 @@ mod tests {
 
         let routes = tour.route_vec();
         assert_eq!(3, routes.len());
+
+        let mut tourset = TourSet::new();
+        tourset.insert(vec![0, 1, 7, 6, 0, 2, 5, 0, 3, 4]);
+        assert!(tourset.contains(&tour.route_vec_sorted()));
     }
 }
