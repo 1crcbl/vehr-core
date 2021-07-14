@@ -55,6 +55,12 @@ impl<M> AsMut<Node> for MetaNode<M> {
     }
 }
 
+impl<M> PartialEq for MetaNode<M> {
+    fn eq(&self, other: &Self) -> bool {
+        self.data == other.data
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Node {
     pub(crate) inner: Option<NonNull<InnerNode>>,
@@ -229,6 +235,7 @@ impl Route {
         }
     }
 
+    #[inline]
     pub fn check_capacity(&self, demand: f64) -> bool {
         match self.inner {
             Some(inner) => unsafe {
@@ -239,9 +246,31 @@ impl Route {
         }
     }
 
+    #[inline]
+    unsafe fn check_capacity_(
+        route1: &Option<NonNull<InnerRoute>>,
+        route2: &Option<NonNull<InnerRoute>>,
+    ) -> bool {
+        match (route1, route2) {
+            (Some(inner1), Some(inner2)) => {
+                let tmp_load = inner1.as_ref().load + inner2.as_ref().load;
+                tmp_load <= inner1.as_ref().capacity
+            }
+            _ => panic_ptr!("Route"),
+        }
+    }
+
+    #[inline]
     pub fn rev(&mut self, rev: bool) {
-        match self.inner {
-            Some(inner) => unsafe { (*inner.as_ptr()).rev = rev },
+        unsafe {
+            Self::rev_(&self.inner, rev);
+        }
+    }
+
+    #[inline]
+    unsafe fn rev_(route: &Option<NonNull<InnerRoute>>, rev: bool) {
+        match route {
+            Some(inner) => (*inner.as_ptr()).rev = rev,
             None => panic_ptr!("Route"),
         }
     }
@@ -258,49 +287,55 @@ impl Route {
     }
 
     /// Moves all nodes from `other` into the front of `Self`, taking into account the traversal direction.
+    #[inline]
     pub fn append_front(&mut self, other: &mut Self) {
-        if self.inner != other.inner {
-            if let Some(inner) = other.inner {
-                unsafe {
-                    if inner.as_ref().rev {
-                        let mut node = inner.as_ref().first;
-                        while let Some(inner) = node {
-                            let next = inner.as_ref().successor;
-                            Self::push_front_(&self.inner, &node);
-                            node = next;
-                        }
-                    } else {
-                        let mut node = inner.as_ref().last;
-                        while let Some(inner) = node {
-                            let next = inner.as_ref().predecessor;
-                            Self::push_front_(&self.inner, &node);
-                            node = next;
-                        }
+        unsafe {
+            Self::append_front_(&mut self.inner, &mut other.inner);
+        }
+    }
+
+    #[inline]
+    unsafe fn append_front_(
+        route1: &mut Option<NonNull<InnerRoute>>,
+        route2: &mut Option<NonNull<InnerRoute>>,
+    ) {
+        if route1 != route2 {
+            if let Some(inner) = route2 {
+                if inner.as_ref().rev {
+                    while let Some(inner_node) = Route::pop_first_(route2) {
+                        Self::push_front_(route1, &Some(inner_node));
+                    }
+                } else {
+                    while let Some(inner_node) = Route::pop_last_(route2) {
+                        Self::push_front_(route1, &Some(inner_node));
                     }
                 }
             }
         }
     }
 
+    #[inline]
     /// Moves all nodes from `other` into the front of `Self`, taking into account the traversal direction.
     pub fn append_back(&mut self, other: &mut Self) {
-        if self.inner != other.inner {
-            if let Some(inner) = other.inner {
-                unsafe {
-                    if inner.as_ref().rev {
-                        let mut node = inner.as_ref().last;
-                        while let Some(inner) = node {
-                            let next = inner.as_ref().predecessor;
-                            Self::push_back_(&self.inner, &node);
-                            node = next;
-                        }
-                    } else {
-                        let mut node = inner.as_ref().first;
-                        while let Some(inner) = node {
-                            let next = inner.as_ref().successor;
-                            Self::push_back_(&self.inner, &node);
-                            node = next;
-                        }
+        unsafe {
+            Self::append_back_(&mut self.inner, &mut other.inner);
+        }
+    }
+
+    #[inline]
+    unsafe fn append_back_(
+        route1: &mut Option<NonNull<InnerRoute>>,
+        route2: &mut Option<NonNull<InnerRoute>>,
+    ) {
+        if route1 != route2 {
+            if let Some(inner) = route2 {
+                if inner.as_ref().rev {
+                    while let Some(inner_node) = Route::pop_last_(route2) {
+                        Self::push_back_(route1, &Some(inner_node));
+                    }
+                } else {
+                    while let Some(inner_node) = Route::pop_first_(route2) {
+                        Self::push_back_(route1, &Some(inner_node));
                     }
                 }
             }
@@ -373,6 +408,104 @@ impl Route {
         };
     }
 
+    #[inline]
+    pub fn pop_back(&mut self) -> Option<Node> {
+        unsafe {
+            let result = Route::pop_back_(&mut self.inner);
+            if result.is_some() {
+                Some(Node { inner: result })
+            } else {
+                None
+            }
+        }
+    }
+
+    #[inline]
+    unsafe fn pop_back_(route: &mut Option<NonNull<InnerRoute>>) -> Option<NonNull<InnerNode>> {
+        match route {
+            Some(inner) => {
+                if inner.as_ref().rev {
+                    Route::pop_first_(route)
+                } else {
+                    Route::pop_last_(route)
+                }
+            }
+            None => None,
+        }
+    }
+
+    #[inline]
+    pub fn pop_front(&mut self) -> Option<Node> {
+        unsafe {
+            let result = Route::pop_front_(&mut self.inner);
+            if result.is_some() {
+                Some(Node { inner: result })
+            } else {
+                None
+            }
+        }
+    }
+
+    #[inline]
+    unsafe fn pop_front_(route: &mut Option<NonNull<InnerRoute>>) -> Option<NonNull<InnerNode>> {
+        match route {
+            Some(inner) => {
+                if inner.as_ref().rev {
+                    Route::pop_last_(route)
+                } else {
+                    Route::pop_first_(route)
+                }
+            }
+            None => None,
+        }
+    }
+
+    #[inline]
+    unsafe fn pop_first_(route: &mut Option<NonNull<InnerRoute>>) -> Option<NonNull<InnerNode>> {
+        match *route {
+            Some(inner) => {
+                let result = inner.as_ref().first;
+                if let Some(inner_node) = result {
+                    (*inner.as_ptr()).first = inner_node.as_ref().successor;
+                    (*inner.as_ptr()).n_nodes -= 1;
+                    (*inner.as_ptr()).load -= inner_node.as_ref().demand;
+
+                    if inner_node.as_ref().successor.is_none() {
+                        (*inner.as_ptr()).last = None;
+                    }
+
+                    (*inner_node.as_ptr()).route = None;
+                    (*inner_node.as_ptr()).successor = None;
+                }
+                result
+            }
+            None => None,
+        }
+    }
+
+    #[inline]
+    unsafe fn pop_last_(route: &Option<NonNull<InnerRoute>>) -> Option<NonNull<InnerNode>> {
+        match route {
+            Some(inner) => {
+                let result = inner.as_ref().last;
+                if let Some(inner_node) = result {
+                    (*inner.as_ptr()).last = inner_node.as_ref().predecessor;
+                    (*inner.as_ptr()).n_nodes -= 1;
+                    (*inner.as_ptr()).load -= inner_node.as_ref().demand;
+
+                    if inner_node.as_ref().predecessor.is_none() {
+                        (*inner.as_ptr()).first = None;
+                    }
+
+                    (*inner_node.as_ptr()).route = None;
+                    (*inner_node.as_ptr()).predecessor = None;
+                }
+                result
+            }
+            None => None,
+        }
+    }
+
     pub fn index_vec(&self) -> Vec<usize> {
         match self.inner {
             Some(inner) => unsafe {
@@ -412,20 +545,6 @@ impl Default for Route {
     }
 }
 
-impl Drop for Route {
-    fn drop(&mut self) {
-        if let Some(inner) = self.inner {
-            unsafe {
-                (*inner.as_ptr()).depot = None;
-                (*inner.as_ptr()).first = None;
-                (*inner.as_ptr()).last = None;
-                Box::from_raw(inner.as_ptr());
-            }
-        }
-        self.inner = None;
-    }
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct InnerRoute {
     n_nodes: usize,
@@ -454,6 +573,11 @@ impl<M> Tour<M> {
         }
     }
 
+    #[inline]
+    pub fn route_vec(&self) -> Vec<Vec<usize>> {
+        self.routes.iter().map(|r| r.index_vec()).collect()
+    }
+
     pub fn init_cw(&mut self) {
         let depot = self.reg.depot().expect("There must be at least one depot.");
         let len = self.reg.len();
@@ -472,25 +596,44 @@ impl<M> Tour<M> {
 
             let d_depot1 = cache.distance(mn1, depot);
             for mn2 in self.reg.node_iter() {
-                let d_depot2 = cache.distance(mn2, depot);
-                let d_12 = cache.distance(mn1, mn2);
-                let saving = d_depot1 + d_depot2 - d_12;
-                bh.push(SavingPair::new(mn1.node(), mn2.node(), saving));
+                if mn1 != mn2 {
+                    let d_depot2 = cache.distance(mn2, depot);
+                    let d_12 = cache.distance(mn1, mn2);
+                    let saving = d_depot1 + d_depot2 - d_12;
+                    bh.push(SavingPair::new(mn1.node(), mn2.node(), saving));
+                }
             }
         }
 
         while let Some(pair) = bh.pop() {
             let (node1, node2, _) = pair.into_value();
 
-            match (node1.pos(), node2.pos()) {
-                (NodePos::First, NodePos::First) => todo!(),
-                (NodePos::First, NodePos::Last) => todo!(),
-                (NodePos::Last, NodePos::First) => todo!(),
-                (NodePos::Last, NodePos::Last) => todo!(),
-                _ => {}
+            if node1.kind() != NodeKind::Depot && node2.kind() != NodeKind::Depot {
+                unsafe {
+                    let mut route1 = node1.inner.as_ref().unwrap().as_ref().route;
+                    let mut route2 = node2.inner.as_ref().unwrap().as_ref().route;
+                    
+                    if Route::check_capacity_(&route1, &route2) {
+                        match (node1.pos(), node2.pos()) {
+                            (NodePos::First, NodePos::First) => {
+                                Route::rev_(&route2, true);
+                                Route::append_front_(&mut route1, &mut route2);
+                            }
+                            (NodePos::First, NodePos::Last) => Route::append_front_(&mut route1, &mut route2),
+                            (NodePos::Last, NodePos::First) => Route::append_back_(&mut route1, &mut route2),
+                            (NodePos::Last, NodePos::Last) => {
+                                Route::rev_(&route2, true);
+                                Route::append_back_(&mut route1, &mut route2);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             }
         }
 
+        routes.retain(|r| !r.is_empty());
+        routes.shrink_to_fit();
         self.routes = routes;
     }
 }
@@ -550,6 +693,8 @@ impl<'s> Ord for SavingPair<'s> {
 
 #[cfg(test)]
 mod tests {
+    use crate::{distance::LowerColDist, reg::NodeRegistry, tour::Tour};
+
     use super::{Node, NodeKind, Route};
 
     #[test]
@@ -603,6 +748,29 @@ mod tests {
     }
 
     #[test]
+    fn test_append_back() {
+        let depot = Node::new(0, NodeKind::Depot, 0.);
+        let mut route1 = Route::new(&depot, 1000.);
+        let nodes: Vec<_> = (1..=10)
+            .map(|ii| Node::new(ii, NodeKind::Request, 10.))
+            .collect();
+        nodes
+            .iter()
+            .take(5)
+            .for_each(|node| route1.push_front(node));
+
+        let mut route2 = Route::new(&depot, 1000.);
+        nodes
+            .iter()
+            .rev()
+            .take(5)
+            .for_each(|node| route2.push_front(node));
+
+        route1.append_back(&mut route2);
+        assert_eq!(&vec![0, 5, 4, 3, 2, 1, 6, 7, 8, 9, 10], &route1.index_vec());
+    }
+
+    #[test]
     fn test_append_front() {
         let depot = Node::new(0, NodeKind::Depot, 0.);
         let mut route1 = Route::new(&depot, 1000.);
@@ -626,25 +794,81 @@ mod tests {
     }
 
     #[test]
-    fn test_append_back() {
+    fn test_pop_back() {
         let depot = Node::new(0, NodeKind::Depot, 0.);
-        let mut route1 = Route::new(&depot, 1000.);
-        let nodes: Vec<_> = (1..=10)
+        let mut route = Route::new(&depot, 1000.);
+
+        let nodes: Vec<_> = (1..=2)
             .map(|ii| Node::new(ii, NodeKind::Request, 10.))
             .collect();
-        nodes
-            .iter()
-            .take(5)
-            .for_each(|node| route1.push_front(node));
+        nodes.iter().for_each(|node| route.push_back(node));
 
-        let mut route2 = Route::new(&depot, 1000.);
-        nodes
-            .iter()
-            .rev()
-            .take(5)
-            .for_each(|node| route2.push_front(node));
+        route.pop_back();
+        route.pop_back();
 
-        route1.append_back(&mut route2);
-        assert_eq!(&vec![0, 5, 4, 3, 2, 1, 6, 7, 8, 9, 10], &route1.index_vec());
+        assert_eq!(0., route.load());
+        assert_eq!(1, route.n_nodes());
+        assert_eq!(&vec![0], &route.index_vec());
+
+        route.rev(true);
+        assert_eq!(&vec![0], &route.index_vec());
+    }
+
+    #[test]
+    fn test_pop_front() {
+        let depot = Node::new(0, NodeKind::Depot, 0.);
+        let mut route = Route::new(&depot, 1000.);
+
+        let nodes: Vec<_> = (1..=2)
+            .map(|ii| Node::new(ii, NodeKind::Request, 10.))
+            .collect();
+        nodes.iter().for_each(|node| route.push_back(node));
+
+        route.pop_front();
+        route.pop_front();
+
+        assert_eq!(0., route.load());
+        assert_eq!(1, route.n_nodes());
+        assert_eq!(&vec![0], &route.index_vec());
+
+        route.rev(true);
+        assert_eq!(&vec![0], &route.index_vec());
+    }
+
+    #[test]
+    fn test_cw() {
+        let dist_mtx = vec![
+            vec![4., 4., 2.83, 4., 5., 2., 4.24],
+            vec![5.66, 6.32, 8., 8.54, 4.47, 3.16],
+            vec![2.83, 5.66, 8.06, 6., 7.62],
+            vec![2.83, 5.39, 4.47, 7.07],
+            vec![3., 4.47, 7.62],
+            vec![4.12, 7.],
+            vec![3.16],
+        ]
+        .iter()
+        .cloned()
+        .flatten()
+        .collect::<Vec<f64>>();
+
+        let lcd = LowerColDist::new(8, dist_mtx);
+
+        let mut reg = NodeRegistry::<()>::new(8);
+        reg.add(vec![0.; 0], NodeKind::Depot, 0., ());
+        reg.add(vec![0.; 0], NodeKind::Request, 12., ());
+        reg.add(vec![0.; 0], NodeKind::Request, 12., ());
+        reg.add(vec![0.; 0], NodeKind::Request, 6., ());
+        reg.add(vec![0.; 0], NodeKind::Request, 16., ());
+        reg.add(vec![0.; 0], NodeKind::Request, 15., ());
+        reg.add(vec![0.; 0], NodeKind::Request, 10., ());
+        reg.add(vec![0.; 0], NodeKind::Request, 8., ());
+
+        reg.compute(&lcd);
+
+        let mut tour = Tour::new(reg, 30.);
+        tour.init_cw();
+
+        let routes = tour.route_vec();
+        assert_eq!(3, routes.len());
     }
 }
