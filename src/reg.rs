@@ -193,6 +193,7 @@ impl DistanceCache {
         Self { inner }
     }
 
+    #[inline]
     pub fn distance<I>(&self, a: &I, b: &I) -> f64
     where
         I: NodeIndex,

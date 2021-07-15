@@ -422,14 +422,15 @@ impl Route {
                 let result = inner.as_ref().first;
                 if let Some(inner_node) = result {
                     (*inner.as_ptr()).first = inner_node.as_ref().successor;
-                    (*inner.as_ptr()).n_nodes -= 1;
                     (*inner.as_ptr()).load -= inner_node.as_ref().demand;
+                    (*inner.as_ptr()).n_nodes -= 1;
 
                     if inner_node.as_ref().successor.is_none() {
                         (*inner.as_ptr()).last = None;
                     }
 
                     (*inner_node.as_ptr()).route = None;
+                    (*inner_node.as_ptr()).predecessor = None;
                     (*inner_node.as_ptr()).successor = None;
                 }
                 result
@@ -445,8 +446,8 @@ impl Route {
                 let result = inner.as_ref().last;
                 if let Some(inner_node) = result {
                     (*inner.as_ptr()).last = inner_node.as_ref().predecessor;
-                    (*inner.as_ptr()).n_nodes -= 1;
                     (*inner.as_ptr()).load -= inner_node.as_ref().demand;
+                    (*inner.as_ptr()).n_nodes -= 1;
 
                     if inner_node.as_ref().predecessor.is_none() {
                         (*inner.as_ptr()).first = None;
@@ -454,10 +455,44 @@ impl Route {
 
                     (*inner_node.as_ptr()).route = None;
                     (*inner_node.as_ptr()).predecessor = None;
+                    (*inner_node.as_ptr()).successor = None;
                 }
                 result
             }
             None => None,
+        }
+    }
+
+    #[inline]
+    pub fn insert_back(pivot: &mut Node, node: &mut Node) {
+        if let (Some(innerp), Some(innern)) = (pivot.inner, node.inner) {
+            unsafe {
+                if let Some(route) = innerp.as_ref().route {
+                    if route.as_ref().rev {
+                        let old_pred = innerp.as_ref().predecessor;
+                        (*innerp.as_ptr()).predecessor = node.inner;
+                        (*innern.as_ptr()).successor = pivot.inner;
+
+                        if let Some(pred) = old_pred {
+                            (*innern.as_ptr()).predecessor = old_pred;
+                            (*pred.as_ptr()).successor = node.inner;
+                        } else {
+                            (*route.as_ptr()).last = node.inner;
+                        }
+                    } else {
+                        let old_succ = innerp.as_ref().successor;
+                        (*innerp.as_ptr()).successor = node.inner;
+                        (*innern.as_ptr()).predecessor = pivot.inner;
+
+                        if let Some(succ) = old_succ {
+                            (*innern.as_ptr()).successor = old_succ;
+                            (*succ.as_ptr()).predecessor = node.inner;
+                        } else {
+                            (*route.as_ptr()).last = node.inner;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -696,6 +731,7 @@ impl<'s> Default for ArcIter<'s> {
     }
 }
 
+#[derive(Debug)]
 pub struct Arc {
     head: Node,
     tail: Node,
@@ -787,10 +823,29 @@ impl Tour {
     }
 
     #[inline]
+    pub fn new_route(&mut self) -> &mut Route {
+        let route = Route::new(
+            self.reg.depot().unwrap(),
+            self.vehicle_capacity,
+            self.reg.cache(),
+        );
+        self.routes.push(route);
+        self.routes.last_mut().unwrap()
+    }
+
+    #[inline]
     pub fn total_distance(&self) -> f64 {
         self.routes
             .iter()
             .fold(0., |acc, x| acc + x.total_distance())
+    }
+
+    #[inline]
+    pub fn distance<I>(&self, a: &I, b: &I) -> f64
+    where
+        I: NodeIndex,
+    {
+        self.reg.cache().distance(a, b)
     }
 
     /// Initialises the tour by using the Clarke-Wright savings algorithm.
@@ -811,7 +866,7 @@ impl Tour {
 
             let d_depot1 = cache.distance(node1, depot);
             for node2 in self.reg.node_iter() {
-                if node1 != node2 {
+                if node2.kind() != NodeKind::Depot && node1 != node2 {
                     let d_depot2 = cache.distance(node2, depot);
                     let d_12 = cache.distance(node1, node2);
                     let saving = d_depot1 + d_depot2 - d_12;
