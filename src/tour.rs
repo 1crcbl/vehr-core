@@ -1,6 +1,9 @@
-use std::{collections::BinaryHeap, ptr::NonNull};
+use std::{collections::BinaryHeap, marker::PhantomData, ptr::NonNull};
 
-use crate::reg::{DistanceCache, NodeRegistry};
+use crate::{
+    reg::{DistanceCache, NodeRegistry},
+    traits::NodeIndex,
+};
 
 macro_rules! panic_ptr {
     ($name:expr) => {
@@ -27,6 +30,10 @@ impl Node {
         Self {
             inner: NonNull::new(Box::leak(inner)),
         }
+    }
+
+    pub(crate) fn from_nonnull(ptr: Option<NonNull<InnerNode>>) -> Self {
+        Self { inner: ptr }
     }
 
     #[inline]
@@ -474,26 +481,15 @@ impl Route {
         }
     }
 
+    #[inline]
     pub fn total_distance(&self) -> f64 {
         let mut result = 0.;
 
         if let Some(inner) = self.inner {
             unsafe {
-                let depot_idx = inner.as_ref().depot.unwrap().as_ref().index;
-
-                let mut node1 = inner.as_ref().depot;
-                let mut node2 = inner.as_ref().first;
-
                 let cache = &inner.as_ref().cache;
-
-                while let (Some(inner1), Some(inner2)) = (node1, node2) {
-                    result += cache.distance(&inner1.as_ref().index, &inner2.as_ref().index);
-                    if inner2.as_ref().successor.is_none() {
-                        result += cache.distance(&inner2.as_ref().index, &depot_idx);
-                    }
-
-                    node1 = node2;
-                    node2 = inner2.as_ref().successor;
+                for arc in self.arc_iter() {
+                    result += cache.distance(arc.tail(), arc.head());
                 }
             }
         }
@@ -506,19 +502,11 @@ impl Route {
             Some(inner) => unsafe {
                 let mut result = Vec::with_capacity(self.n_nodes());
 
-                let rev = inner.as_ref().rev;
-
-                let mut node = if rev {
-                    inner.as_ref().last
-                } else {
-                    inner.as_ref().first
-                };
-
                 let mut min_node = std::usize::MAX;
                 let mut min_idx = 0;
 
-                while let Some(tmp) = node {
-                    let idx = tmp.as_ref().index;
+                for node in self.node_iter() {
+                    let idx = node.index();
 
                     if idx < min_node {
                         min_node = idx;
@@ -526,11 +514,6 @@ impl Route {
                     }
 
                     result.push(idx);
-                    if rev {
-                        node = tmp.as_ref().predecessor;
-                    } else {
-                        node = tmp.as_ref().successor;
-                    }
                 }
 
                 result.rotate_left(min_idx);
@@ -543,11 +526,190 @@ impl Route {
             None => panic_ptr!("Route"),
         }
     }
+
+    pub fn node_iter(&self) -> NodeIter {
+        match self.inner {
+            Some(inner) => unsafe {
+                let rev = inner.as_ref().rev;
+                let node = if rev {
+                    inner.as_ref().last
+                } else {
+                    inner.as_ref().first
+                };
+                NodeIter::new(inner.as_ref().n_nodes, rev, node)
+            },
+            None => NodeIter::default(),
+        }
+    }
+
+    pub fn arc_iter(&self) -> ArcIter {
+        match self.inner {
+            Some(inner) => unsafe {
+                let rev = inner.as_ref().rev;
+                let node = if rev {
+                    inner.as_ref().last
+                } else {
+                    inner.as_ref().first
+                };
+                ArcIter::new(rev, inner.as_ref().depot, node)
+            },
+            None => ArcIter::default(),
+        }
+    }
 }
 
 impl Default for Route {
     fn default() -> Self {
         Self { inner: None }
+    }
+}
+
+pub struct NodeIter<'s> {
+    len: usize,
+    rev: bool,
+    node: Option<NonNull<InnerNode>>,
+    phantom: PhantomData<&'s ()>,
+}
+
+impl<'s> NodeIter<'s> {
+    fn new(len: usize, rev: bool, node: Option<NonNull<InnerNode>>) -> Self {
+        Self {
+            len,
+            rev,
+            node,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'s> Iterator for NodeIter<'s> {
+    // TODO: should be &'s Node
+    type Item = Node;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.node.map(|node| unsafe {
+            let t = &*node.as_ptr();
+            let result = Node::from_nonnull(self.node);
+            self.len -= 1;
+
+            if self.rev {
+                self.node = t.predecessor;
+            } else {
+                self.node = t.successor;
+            }
+
+            result
+        })
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
+    }
+
+    #[inline]
+    fn last(self) -> Option<Self::Item>
+    where
+        Self: Sized,
+    {
+        todo!()
+    }
+}
+
+impl<'s> Default for NodeIter<'s> {
+    fn default() -> Self {
+        Self {
+            len: 0,
+            rev: false,
+            node: None,
+            phantom: PhantomData,
+        }
+    }
+}
+
+pub struct ArcIter<'s> {
+    rev: bool,
+    depot: Option<NonNull<InnerNode>>,
+    node1: Option<NonNull<InnerNode>>,
+    node2: Option<NonNull<InnerNode>>,
+    phantom: PhantomData<&'s ()>,
+}
+
+impl<'s> ArcIter<'s> {
+    fn new(rev: bool, depot: Option<NonNull<InnerNode>>, node: Option<NonNull<InnerNode>>) -> Self {
+        Self {
+            rev,
+            depot,
+            node1: depot,
+            node2: node,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'s> Iterator for ArcIter<'s> {
+    type Item = Arc;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match (self.node1, self.node2) {
+            (Some(_), Some(node2)) => unsafe {
+                let arc = Arc {
+                    head: Node::from_nonnull(self.node2),
+                    tail: Node::from_nonnull(self.node1),
+                };
+
+                self.node1 = self.node2;
+                self.node2 = if self.rev {
+                    node2.as_ref().predecessor
+                } else {
+                    node2.as_ref().successor
+                };
+
+                Some(arc)
+            },
+            (Some(_), None) => {
+                let arc = Arc {
+                    head: Node::from_nonnull(self.depot),
+                    tail: Node::from_nonnull(self.node1),
+                };
+
+                self.node1 = None;
+
+                Some(arc)
+            }
+            _ => None,
+        }
+    }
+}
+
+impl<'s> Default for ArcIter<'s> {
+    fn default() -> Self {
+        Self {
+            rev: false,
+            depot: None,
+            node1: None,
+            node2: None,
+            phantom: PhantomData,
+        }
+    }
+}
+
+pub struct Arc {
+    head: Node,
+    tail: Node,
+}
+
+impl Arc {
+    #[inline]
+    pub fn head(&self) -> &Node {
+        &self.head
+    }
+
+    #[inline]
+    pub fn tail(&self) -> &Node {
+        &self.tail
     }
 }
 
@@ -595,6 +757,21 @@ impl Tour {
     #[inline]
     pub fn node_mut(&mut self, index: usize) -> Option<&mut Node> {
         self.reg.node_mut(index)
+    }
+
+    #[inline]
+    pub fn n_routes(&self) -> usize {
+        self.routes.len()
+    }
+
+    #[inline]
+    pub fn route(&self, index: usize) -> Option<&Route> {
+        self.routes.get(index)
+    }
+
+    #[inline]
+    pub fn route_mut(&mut self, index: usize) -> Option<&mut Route> {
+        self.routes.get_mut(index)
     }
 
     #[inline]
@@ -677,6 +854,16 @@ impl Tour {
         routes.retain(|r| !r.is_empty());
         routes.shrink_to_fit();
         self.routes = routes;
+    }
+
+    #[inline]
+    pub fn route_iter(&self) -> std::slice::Iter<Route> {
+        self.routes.iter()
+    }
+
+    #[inline]
+    pub fn route_iter_mut(&mut self) -> std::slice::IterMut<Route> {
+        self.routes.iter_mut()
     }
 }
 
