@@ -137,7 +137,7 @@ enum NodePos {
     None,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Route {
     inner: Option<NonNull<InnerRoute>>,
 }
@@ -425,8 +425,9 @@ impl Route {
                     (*inner.as_ptr()).load -= inner_node.as_ref().demand;
                     (*inner.as_ptr()).n_nodes -= 1;
 
-                    if inner_node.as_ref().successor.is_none() {
-                        (*inner.as_ptr()).last = None;
+                    match inner_node.as_ref().successor {
+                        Some(succ) => (*succ.as_ptr()).predecessor = None,
+                        None => (*inner.as_ptr()).last = None,
                     }
 
                     (*inner_node.as_ptr()).route = None;
@@ -449,8 +450,9 @@ impl Route {
                     (*inner.as_ptr()).load -= inner_node.as_ref().demand;
                     (*inner.as_ptr()).n_nodes -= 1;
 
-                    if inner_node.as_ref().predecessor.is_none() {
-                        (*inner.as_ptr()).first = None;
+                    match inner_node.as_ref().predecessor {
+                        Some(pred) => (*pred.as_ptr()).successor = None,
+                        None => (*inner.as_ptr()).first = None,
                     }
 
                     (*inner_node.as_ptr()).route = None;
@@ -468,6 +470,10 @@ impl Route {
         if let (Some(innerp), Some(innern)) = (pivot.inner, node.inner) {
             unsafe {
                 if let Some(route) = innerp.as_ref().route {
+                    (*route.as_ptr()).n_nodes += 1;
+                    (*route.as_ptr()).load += innern.as_ref().demand;
+                    (*innern.as_ptr()).route = innerp.as_ref().route;
+
                     if route.as_ref().rev {
                         let old_pred = innerp.as_ref().predecessor;
                         (*innerp.as_ptr()).predecessor = node.inner;
@@ -477,7 +483,7 @@ impl Route {
                             (*innern.as_ptr()).predecessor = old_pred;
                             (*pred.as_ptr()).successor = node.inner;
                         } else {
-                            (*route.as_ptr()).last = node.inner;
+                            (*route.as_ptr()).first = node.inner;
                         }
                     } else {
                         let old_succ = innerp.as_ref().successor;
@@ -500,6 +506,9 @@ impl Route {
         if let Some(inner) = node.inner {
             unsafe {
                 if let Some(route) = inner.as_ref().route {
+                    (*route.as_ptr()).n_nodes -= 1;
+                    (*route.as_ptr()).load -= inner.as_ref().demand;
+
                     if let Some(pred) = inner.as_ref().predecessor {
                         (*pred.as_ptr()).successor = inner.as_ref().successor;
                     } else {
@@ -511,6 +520,10 @@ impl Route {
                     } else {
                         (*route.as_ptr()).last = inner.as_ref().predecessor;
                     }
+
+                    (*inner.as_ptr()).route = None;
+                    (*inner.as_ptr()).predecessor = None;
+                    (*inner.as_ptr()).successor = None;
                 }
             }
         }
@@ -689,7 +702,7 @@ impl<'s> Iterator for ArcIter<'s> {
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         match (self.node1, self.node2) {
-            (Some(_), Some(node2)) => unsafe {
+            (Some(_node1), Some(node2)) => unsafe {
                 let arc = Arc {
                     head: Node::from_nonnull(self.node2),
                     tail: Node::from_nonnull(self.node1),
@@ -762,7 +775,7 @@ pub(crate) struct InnerRoute {
     rev: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Tour {
     vehicle_capacity: f64,
     reg: NodeRegistry,
@@ -909,6 +922,11 @@ impl Tour {
         routes.retain(|r| !r.is_empty());
         routes.shrink_to_fit();
         self.routes = routes;
+    }
+
+    #[inline]
+    pub fn drop_empty(&mut self) {
+        self.routes.retain(|r| !r.is_empty());
     }
 
     #[inline]
