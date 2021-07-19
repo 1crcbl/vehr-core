@@ -1,3 +1,4 @@
+//! Tour module
 use std::{collections::BinaryHeap, marker::PhantomData, ptr::NonNull};
 
 use crate::{
@@ -11,13 +12,14 @@ macro_rules! panic_ptr {
     };
 }
 
+/// A struct representing a location in a routing problem instance.
 #[derive(Clone, Debug)]
 pub struct Node {
     pub(crate) inner: Option<NonNull<InnerNode>>,
 }
 
 impl Node {
-    pub(super) fn new(index: usize, kind: NodeKind, demand: f64) -> Self {
+    pub fn new(index: usize, kind: NodeKind, demand: f64) -> Self {
         let inner = Box::new(InnerNode {
             index,
             demand,
@@ -121,12 +123,22 @@ pub(crate) struct InnerNode {
     pub(crate) successor: Option<NonNull<InnerNode>>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Hash)]
+/// An enum representing the type for each node.
+///
+/// In a routing problem instance, every node must be either a [`NodeKind::Depot`] or a [`NodeKind::Request`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum NodeKind {
+    /// A location from which vehicles originate.
+    ///
+    /// A depot node can be assigned to multiple routes.
     Depot,
+    /// A location where vehicles must arrive and provide requested services.
+    ///
+    /// A request node can only be assigned to one route.
     Request,
 }
 
+///
 #[derive(Clone, Copy, Debug, PartialEq, Hash)]
 enum NodePos {
     First,
@@ -135,6 +147,15 @@ enum NodePos {
     None,
 }
 
+/// A struct representing a route (sub-tour) in a routing problem.
+///
+/// Each route contains a subset of locations in a routing problem and has maximally one node of type
+/// [`NodeKind::Depot`] while the other nodes in that route must be of type [`NodeKind::Request`].
+/// The intersection set of two routes in a tour is either empty or contains exactly one element: a
+/// depot.
+///
+/// It is assumed that for every route, a vehicle must start from the route's depot, visit all request
+/// nodes assigned to the route and return back to the depot.
 #[derive(Debug)]
 pub struct Route {
     inner: Option<NonNull<InnerRoute>>,
@@ -178,6 +199,7 @@ impl Route {
         route
     }
 
+    /// Returns the capacity of a vehicle assigned to this route.
     #[inline]
     pub fn capacity(&self) -> f64 {
         match self.inner {
@@ -227,6 +249,22 @@ impl Route {
         }
     }
 
+    /// Reverses the `Route`'s traversal direction.
+    /// 
+    /// # Examples
+    /// ```
+    /// # use vehr_core::reg::DistanceCache;
+    /// # use vehr_core::tour::Node;
+    /// # use vehr_core::tour::NodeKind;
+    /// # use vehr_core::tour::Route;
+    /// # 
+    /// let mut route = Route::new(&Node::new(0, NodeKind::Depot, 0.), 10., &DistanceCache::default());
+    /// (1..=3).for_each(|ii| route.push_back(&Node::new(ii, NodeKind::Request, 1.)));
+    ///
+    /// assert_eq!(&vec![0, 1, 2, 3], &route.index_vec());
+    /// route.rev(true);
+    /// assert_eq!(&vec![0, 3, 2, 1], &route.index_vec());
+    /// ```
     #[inline]
     pub fn rev(&mut self, rev: bool) {
         unsafe {
@@ -242,6 +280,24 @@ impl Route {
         }
     }
 
+    /// Checks whether the route is empty.
+    ///
+    /// A route is empty when it contains no request nodes. This means that a route containing only
+    /// a depot node is also considered empty.
+    ///
+    /// # Examples
+    /// ```
+    /// # use vehr_core::reg::DistanceCache;
+    /// # use vehr_core::tour::Node;
+    /// # use vehr_core::tour::NodeKind;
+    /// # use vehr_core::tour::Route;
+    /// # 
+    /// let mut route = Route::new(&Node::new(0, NodeKind::Depot, 0.), 10., &DistanceCache::default());
+    /// assert!(route.is_empty());
+    ///
+    /// route.push_back(&Node::new(1, NodeKind::Request, 10.));
+    /// assert!(!route.is_empty());
+    /// ```
     #[inline]
     pub fn is_empty(&self) -> bool {
         match self.inner {
@@ -253,7 +309,8 @@ impl Route {
         }
     }
 
-    /// Moves all nodes from `other` into the front of `Self`, taking into account the traversal direction.
+    /// Moves all nodes from `other` into the front of `Self`, taking into account the traversal direction,
+    /// leaving `other` empty.
     #[inline]
     pub fn append_front(&mut self, other: &mut Self) {
         unsafe {
@@ -282,7 +339,8 @@ impl Route {
     }
 
     #[inline]
-    /// Moves all nodes from `other` into the back of `Self`, taking into account the traversal direction.
+    /// Moves all nodes from `other` into the back of `Self`, taking into account the traversal direction,
+    /// leaving `other` empty.
     pub fn append_back(&mut self, other: &mut Self) {
         unsafe {
             Self::append_back_(&mut self.inner, &mut other.inner);
@@ -309,7 +367,38 @@ impl Route {
         }
     }
 
-    /// Inserts a node at the end of the route.
+    /// Inserts a node at the end of the `Route`, according to its traversal direction.
+    ///
+    /// # Examples
+    /// ```
+    /// # use vehr_core::reg::DistanceCache;
+    /// # use vehr_core::tour::Node;
+    /// # use vehr_core::tour::NodeKind;
+    /// # use vehr_core::tour::Route;
+    /// #
+    /// let depot = Node::new(0, NodeKind::Depot, 0.);
+    /// let mut nodes: Vec<_> = (1..=6).map(|ii| Node::new(ii, NodeKind::Request, 10.)).collect();
+    /// nodes.insert(0, depot);
+    /// let mut route = Route::new(&nodes[0], 1000., &DistanceCache::default());
+    ///
+    /// // Adds 1, 2, 3
+    /// route.push_back(nodes.get(1).unwrap());
+    /// assert_eq!(&vec![0, 1], &route.index_vec());
+    /// route.push_back(nodes.get(2).unwrap());
+    /// assert_eq!(&vec![0, 1, 2], &route.index_vec());
+    /// route.push_back(nodes.get(3).unwrap());
+    /// assert_eq!(&vec![0, 1, 2, 3], &route.index_vec());
+    ///
+    /// route.rev(true);
+    /// 
+    /// // Adds 4, 5, 6
+    /// route.push_back(nodes.get(4).unwrap());
+    /// assert_eq!(&vec![0, 3, 2, 1, 4], &route.index_vec());
+    /// route.push_back(nodes.get(5).unwrap());
+    /// assert_eq!(&vec![0, 3, 2, 1, 4, 5], &route.index_vec());
+    /// route.push_back(nodes.get(6).unwrap());
+    /// assert_eq!(&vec![0, 3, 2, 1, 4, 5, 6], &route.index_vec());
+    /// ```
     #[inline]
     pub fn push_back(&mut self, node: &Node) {
         unsafe {
@@ -317,7 +406,38 @@ impl Route {
         }
     }
 
-    /// Inserts a node at the beginning of the route.
+    /// Inserts a node at the beginning of the `Route`, according to its traversal direction.
+    ///
+    /// # Examples
+    /// ```
+    /// # use vehr_core::reg::DistanceCache;
+    /// # use vehr_core::tour::Node;
+    /// # use vehr_core::tour::NodeKind;
+    /// # use vehr_core::tour::Route;
+    /// # 
+    /// let depot = Node::new(0, NodeKind::Depot, 0.);
+    /// let mut nodes: Vec<_> = (1..=6).map(|ii| Node::new(ii, NodeKind::Request, 10.)).collect();
+    /// nodes.insert(0, depot);
+    /// let mut route = Route::new(&nodes[0], 1000., &DistanceCache::default());
+    ///
+    /// // Adds 1, 2, 3
+    /// route.push_front(nodes.get(1).unwrap());
+    /// assert_eq!(&vec![0, 1], &route.index_vec());
+    /// route.push_front(nodes.get(2).unwrap());
+    /// assert_eq!(&vec![0, 2, 1], &route.index_vec());
+    /// route.push_front(nodes.get(3).unwrap());
+    /// assert_eq!(&vec![0, 3, 2, 1], &route.index_vec());
+    ///
+    /// route.rev(true);
+    /// 
+    /// // Adds 4, 5, 6
+    /// route.push_front(nodes.get(4).unwrap());
+    /// assert_eq!(&vec![0, 4, 1, 2, 3], &route.index_vec());
+    /// route.push_front(nodes.get(5).unwrap());
+    /// assert_eq!(&vec![0, 5, 4, 1, 2, 3], &route.index_vec());
+    /// route.push_front(nodes.get(6).unwrap());
+    /// assert_eq!(&vec![0, 6, 5, 4, 1, 2, 3], &route.index_vec());
+    /// ```
     #[inline]
     pub fn push_front(&mut self, node: &Node) {
         unsafe {
@@ -377,6 +497,9 @@ impl Route {
         };
     }
 
+    /// Removes the last [`NodeKind::Request`] node in the `Route` and returns it, or [`None`] if it is empty.
+    ///
+    /// The function takes into account the `Route`'s traversal direction.
     #[inline]
     pub fn pop_back(&mut self) -> Option<Node> {
         unsafe {
@@ -403,6 +526,9 @@ impl Route {
         }
     }
 
+    /// Removes the first [`NodeKind::Request`] node in the `Route` and returns it, or [`None`] if it is empty.
+    ///
+    /// The function takes into account the `Route`'s traversal direction.
     #[inline]
     pub fn pop_front(&mut self) -> Option<Node> {
         unsafe {
@@ -429,6 +555,9 @@ impl Route {
         }
     }
 
+    /// Removes the first [`NodeKind::Request`] node in the `Route` and returns it, or [`None`] if it is empty.
+    ///
+    /// The function ignores the `Route`'s traversal direction.
     #[inline]
     unsafe fn pop_first_(route: &mut Option<NonNull<InnerRoute>>) -> Option<NonNull<InnerNode>> {
         match *route {
@@ -472,6 +601,9 @@ impl Route {
         }
     }
 
+    /// Removes the last [`NodeKind::Request`] node in the `Route` and returns it, or [`None`] if it is empty.
+    ///
+    /// The function ignores the `Route`'s traversal direction.
     #[inline]
     unsafe fn pop_last_(route: &Option<NonNull<InnerRoute>>) -> Option<NonNull<InnerNode>> {
         match route {
@@ -515,6 +647,9 @@ impl Route {
         }
     }
 
+    /// Inserts a node at the end of the `Route`.
+    ///
+    /// The function takes into account the `Route`'s traversal direction.
     #[inline]
     pub fn insert_back(pivot: &mut Node, node: &mut Node) {
         if let (Some(innerp), Some(innern)) = (pivot.inner, node.inner) {
@@ -552,6 +687,26 @@ impl Route {
         }
     }
 
+    /// Removes a node from its current `Route`. The function will do nothing if it is not assigned
+    /// to any `Route`.
+    ///
+    /// # Examples
+    /// ```
+    /// # use vehr_core::reg::DistanceCache;
+    /// # use vehr_core::tour::Node;
+    /// # use vehr_core::tour::NodeKind;
+    /// # use vehr_core::tour::Route;
+    /// # 
+    /// let mut route = Route::new(&Node::new(0, NodeKind::Depot, 0.), 10., &DistanceCache::default());
+    /// let mut nodes: Vec<_> = (1..=4).map(|ii| {
+    ///         let node = Node::new(ii, NodeKind::Request, 10.);
+    ///         route.push_back(&node);
+    ///         node
+    /// }).collect();
+    ///
+    /// Route::eject(nodes.get_mut(2).unwrap());
+    /// assert_eq!(&vec![0, 1, 2 , 4], &route.index_vec());
+    /// ```
     pub fn eject(node: &mut Node) {
         if let Some(inner) = node.inner {
             unsafe {
@@ -579,6 +734,7 @@ impl Route {
         }
     }
 
+    /// Returns the total distance of a vehicle travelling in the `Route`.
     #[inline]
     pub fn total_distance(&self) -> f64 {
         let mut result = 0.;
@@ -606,6 +762,10 @@ impl Route {
         }
     }
 
+    /// Returns a front-to-back node iterator.
+    ///
+    /// The iterator will traverse all nodes according the `Route`'s traversal direction. The node iterator
+    /// will always start with the `Route`'s depot and end at the final [`NodeKind::Request`] node.
     pub fn node_iter(&self) -> NodeIter {
         match self.inner {
             Some(inner) => unsafe {
@@ -617,6 +777,9 @@ impl Route {
         }
     }
 
+    /// Returns a front-to-back arc iterator.
+    ///
+    /// The iterator will traverse all nodes according the `Route`'s traversal direction.
     pub fn arc_iter(&self) -> ArcIter {
         match self.inner {
             Some(inner) => unsafe {
