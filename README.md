@@ -19,7 +19,7 @@ At the moment, many core functionalities for manipulating nodes in tours and rou
 
 ```
 [dependencies]
-rand = { git = "https://github.com/1crcbl/vehr-core" }
+vehr_core = { git = "https://github.com/1crcbl/vehr-core" }
 ```
 
 ## License
