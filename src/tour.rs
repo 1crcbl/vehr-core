@@ -250,14 +250,13 @@ impl Route {
     }
 
     /// Reverses the `Route`'s traversal direction.
-    /// 
+    ///
     /// # Examples
     /// ```
     /// # use vehr_core::reg::DistanceCache;
     /// # use vehr_core::tour::Node;
     /// # use vehr_core::tour::NodeKind;
     /// # use vehr_core::tour::Route;
-    /// # 
     /// let mut route = Route::new(&Node::new(0, NodeKind::Depot, 0.), 10., &DistanceCache::default());
     /// (1..=3).for_each(|ii| route.push_back(&Node::new(ii, NodeKind::Request, 1.)));
     ///
@@ -291,7 +290,7 @@ impl Route {
     /// # use vehr_core::tour::Node;
     /// # use vehr_core::tour::NodeKind;
     /// # use vehr_core::tour::Route;
-    /// # 
+    /// #
     /// let mut route = Route::new(&Node::new(0, NodeKind::Depot, 0.), 10., &DistanceCache::default());
     /// assert!(route.is_empty());
     ///
@@ -390,7 +389,7 @@ impl Route {
     /// assert_eq!(&vec![0, 1, 2, 3], &route.index_vec());
     ///
     /// route.rev(true);
-    /// 
+    ///
     /// // Adds 4, 5, 6
     /// route.push_back(nodes.get(4).unwrap());
     /// assert_eq!(&vec![0, 3, 2, 1, 4], &route.index_vec());
@@ -414,7 +413,6 @@ impl Route {
     /// # use vehr_core::tour::Node;
     /// # use vehr_core::tour::NodeKind;
     /// # use vehr_core::tour::Route;
-    /// # 
     /// let depot = Node::new(0, NodeKind::Depot, 0.);
     /// let mut nodes: Vec<_> = (1..=6).map(|ii| Node::new(ii, NodeKind::Request, 10.)).collect();
     /// nodes.insert(0, depot);
@@ -429,7 +427,7 @@ impl Route {
     /// assert_eq!(&vec![0, 3, 2, 1], &route.index_vec());
     ///
     /// route.rev(true);
-    /// 
+    ///
     /// // Adds 4, 5, 6
     /// route.push_front(nodes.get(4).unwrap());
     /// assert_eq!(&vec![0, 4, 1, 2, 3], &route.index_vec());
@@ -696,7 +694,6 @@ impl Route {
     /// # use vehr_core::tour::Node;
     /// # use vehr_core::tour::NodeKind;
     /// # use vehr_core::tour::Route;
-    /// # 
     /// let mut route = Route::new(&Node::new(0, NodeKind::Depot, 0.), 10., &DistanceCache::default());
     /// let mut nodes: Vec<_> = (1..=4).map(|ii| {
     ///         let node = Node::new(ii, NodeKind::Request, 10.);

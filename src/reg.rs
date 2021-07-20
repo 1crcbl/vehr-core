@@ -1,8 +1,9 @@
 use std::{collections::HashSet, rc::Rc};
 
 use crate::{
+    distance::DistFn,
     tour::{Node, NodeKind},
-    traits::{DistanceFunc, NodeIndex},
+    traits::NodeIndex,
 };
 
 #[derive(Clone, Debug)]
@@ -109,7 +110,7 @@ impl NodeRegistry {
     /// the result in a cache.
     pub fn compute<F>(&mut self, f: &F)
     where
-        F: DistanceFunc,
+        F: DistFn,
     {
         let len = self.nodes.len();
         let len2 = len * len;
@@ -124,7 +125,7 @@ impl NodeRegistry {
             (0..len).for_each(|id1| {
                 let offset = id1 * len;
                 (0..len).for_each(|id2| {
-                    dist[offset + id2] = f.compute(id1, &[], id2, &[]);
+                    dist[offset + id2] = f.compute_index(id1, id2);
                 })
             })
         } else {
@@ -137,7 +138,7 @@ impl NodeRegistry {
                         .chunks(self.dim)
                         .enumerate()
                         .for_each(|(id2, loc2)| {
-                            dist[offset + id2] = f.compute(0, loc1, 0, loc2);
+                            dist[offset + id2] = f.compute_slice(loc1, loc2);
                         })
                 });
         }
