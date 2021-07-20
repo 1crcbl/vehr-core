@@ -645,40 +645,56 @@ impl Route {
         }
     }
 
-    /// Inserts a node at the end of the `Route`.
+    /// Inserts a node at the back of the `pivot` node.
     ///
-    /// The function takes into account the `Route`'s traversal direction.
+    /// Nothing will change if the `pivot` node is not assigned to any route.
     #[inline]
     pub fn insert_back(pivot: &mut Node, node: &mut Node) {
+        unsafe {
+            Self::insert_(pivot, node, false);
+        }
+    }
+
+    /// Inserts a node at the front of the `pivot` node.
+    ///
+    /// Nothing will change if the `pivot` node is not assigned to any route.
+    #[inline]
+    pub fn insert_front(pivot: &mut Node, node: &mut Node) {
+        unsafe {
+            Self::insert_(pivot, node, true);
+        }
+    }
+
+    unsafe fn insert_(pivot: &mut Node, node: &mut Node, front: bool) {
+        // insert_front -> front = true
+        // insert_back  -> front = false
         if let (Some(innerp), Some(innern)) = (pivot.inner, node.inner) {
-            unsafe {
-                if let Some(route) = innerp.as_ref().route {
-                    (*route.as_ptr()).n_nodes += 1;
-                    (*route.as_ptr()).load += innern.as_ref().demand;
-                    (*innern.as_ptr()).route = innerp.as_ref().route;
+            if let Some(route) = innerp.as_ref().route {
+                (*route.as_ptr()).n_nodes += 1;
+                (*route.as_ptr()).load += innern.as_ref().demand;
+                (*innern.as_ptr()).route = innerp.as_ref().route;
 
-                    if route.as_ref().rev {
-                        let old_pred = innerp.as_ref().predecessor;
-                        (*innerp.as_ptr()).predecessor = node.inner;
-                        (*innern.as_ptr()).successor = pivot.inner;
+                if route.as_ref().rev ^ front {
+                    let old_pred = innerp.as_ref().predecessor;
+                    (*innerp.as_ptr()).predecessor = node.inner;
+                    (*innern.as_ptr()).successor = pivot.inner;
 
-                        if let Some(pred) = old_pred {
-                            (*innern.as_ptr()).predecessor = old_pred;
-                            (*pred.as_ptr()).successor = node.inner;
-                        } else {
-                            (*route.as_ptr()).first = node.inner;
-                        }
+                    if let Some(pred) = old_pred {
+                        (*innern.as_ptr()).predecessor = old_pred;
+                        (*pred.as_ptr()).successor = node.inner;
                     } else {
-                        let old_succ = innerp.as_ref().successor;
-                        (*innerp.as_ptr()).successor = node.inner;
-                        (*innern.as_ptr()).predecessor = pivot.inner;
+                        (*route.as_ptr()).first = node.inner;
+                    }
+                } else {
+                    let old_succ = innerp.as_ref().successor;
+                    (*innern.as_ptr()).predecessor = pivot.inner;
+                    (*innerp.as_ptr()).successor = node.inner;
 
-                        if let Some(succ) = old_succ {
-                            (*innern.as_ptr()).successor = old_succ;
-                            (*succ.as_ptr()).predecessor = node.inner;
-                        } else {
-                            (*route.as_ptr()).last = node.inner;
-                        }
+                    if let Some(succ) = old_succ {
+                        (*innern.as_ptr()).successor = old_succ;
+                        (*succ.as_ptr()).predecessor = node.inner;
+                    } else {
+                        (*route.as_ptr()).last = node.inner;
                     }
                 }
             }
@@ -1397,5 +1413,53 @@ mod tests {
         Route::eject(nodes.get_mut(9).unwrap());
 
         assert_eq!(&vec![0, 4, 2, 1, 9, 8, 7], &route.index_vec());
+    }
+
+    #[test]
+    fn test_insert_back() {
+        let depot = Node::new(0, NodeKind::Depot, 0.);
+        let mut route = Route::new(&depot, 100., &DistanceCache::default());
+
+        let mut nodes: Vec<_> = (1..=3)
+            .map(|ii| Node::new(ii, NodeKind::Request, 1.))
+            .collect();
+        nodes.iter().for_each(|node| route.push_back(node));
+
+        assert_eq!(&vec![0, 1, 2, 3], &route.index_vec());
+        Route::insert_back(
+            nodes.get_mut(1).unwrap(),
+            &mut Node::new(4, NodeKind::Request, 1.),
+        );
+        assert_eq!(&vec![0, 1, 2, 4, 3], &route.index_vec());
+        route.rev(true);
+        Route::insert_back(
+            nodes.get_mut(1).unwrap(),
+            &mut Node::new(5, NodeKind::Request, 1.),
+        );
+        assert_eq!(&vec![0, 3, 4, 2, 5, 1], &route.index_vec());
+    }
+
+    #[test]
+    fn test_insert_front() {
+        let depot = Node::new(0, NodeKind::Depot, 0.);
+        let mut route = Route::new(&depot, 100., &DistanceCache::default());
+
+        let mut nodes: Vec<_> = (1..=3)
+            .map(|ii| Node::new(ii, NodeKind::Request, 1.))
+            .collect();
+        nodes.iter().for_each(|node| route.push_back(node));
+
+        assert_eq!(&vec![0, 1, 2, 3], &route.index_vec());
+        Route::insert_front(
+            nodes.get_mut(1).unwrap(),
+            &mut Node::new(4, NodeKind::Request, 1.),
+        );
+        assert_eq!(&vec![0, 1, 4, 2, 3], &route.index_vec());
+        route.rev(true);
+        Route::insert_front(
+            nodes.get_mut(1).unwrap(),
+            &mut Node::new(5, NodeKind::Request, 1.),
+        );
+        assert_eq!(&vec![0, 3, 5, 2, 4, 1], &route.index_vec());
     }
 }
