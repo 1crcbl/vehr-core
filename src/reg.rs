@@ -8,11 +8,11 @@ use crate::{
 
 #[derive(Clone, Debug)]
 pub struct NodeRegistry {
-    dim: usize,
-    cache: DistanceCache,
-    locations: Vec<f64>,
-    nodes: Vec<Node>,
-    depots: HashSet<usize>,
+    pub(crate) dim: usize,
+    pub(crate) cache: DistanceCache,
+    pub(crate) locations: Vec<f64>,
+    pub(crate) nodes: Vec<Node>,
+    pub(crate) depots: HashSet<usize>,
 }
 
 impl NodeRegistry {

@@ -1,5 +1,9 @@
 //! Tour module
-use std::{collections::BinaryHeap, marker::PhantomData, ptr::NonNull};
+use std::{
+    collections::{BinaryHeap, HashSet},
+    marker::PhantomData,
+    ptr::NonNull,
+};
 
 use crate::{
     reg::{DistanceCache, NodeRegistry},
@@ -162,10 +166,9 @@ pub struct Route {
 }
 
 impl Route {
-    pub fn new<N>(depot: N, vehicle_capacity: f64, cache: &DistanceCache) -> Self
-    where
-        N: AsRef<Node>,
-    {
+    // Similar to new, but without depot.
+    // This function should only be used from Tour::with_setup().
+    fn new_(vehicle_capacity: f64, cache: &DistanceCache) -> Self {
         let inner = Box::new(InnerRoute {
             n_nodes: 0,
             capacity: vehicle_capacity,
@@ -174,12 +177,19 @@ impl Route {
             last: None,
             cache: cache.clone(),
             rev: false,
-            has_depot: depot.as_ref().inner.is_some(),
+            has_depot: false,
         });
 
-        let route = Self {
+        Self {
             inner: NonNull::new(Box::leak(inner)),
-        };
+        }
+    }
+
+    pub fn new<N>(depot: N, vehicle_capacity: f64, cache: &DistanceCache) -> Self
+    where
+        N: AsRef<Node>,
+    {
+        let route = Self::new_(vehicle_capacity, cache);
 
         unsafe {
             // Create new depot
@@ -193,6 +203,7 @@ impl Route {
                 successor: None,
             });
             let new_depot = NonNull::new(Box::leak(new_depot));
+            (*route.inner.unwrap().as_ptr()).has_depot = true;
             Self::push_(&route.inner, &new_depot, false);
         }
 
@@ -1124,6 +1135,25 @@ impl Tour {
         self.routes = routes;
     }
 
+    pub fn with_setup(&mut self, setup: &TourSetup) {
+        if !self.reg.depots.is_superset(&setup.depots) {
+            panic!("Unknown depots in TourSetup")
+        }
+
+        let mut routes = Vec::with_capacity(setup.routes.len());
+        for vr in &setup.routes {
+            let depot = self.reg.node(*vr.first().unwrap()).unwrap();
+            let mut route = Route::new(depot, self.vehicle_capacity, self.reg.cache());
+            vr.iter().skip(1).for_each(|idx| {
+                let node = self.reg.node(*idx).unwrap();
+                route.push_back(node);
+            });
+            routes.push(route);
+        }
+
+        self.routes = routes;
+    }
+
     #[inline]
     pub fn drop_empty(&mut self) {
         self.routes.retain(|r| !r.is_empty());
@@ -1193,8 +1223,94 @@ impl<'s> Ord for SavingPair<'s> {
     }
 }
 
+pub struct TourSetup {
+    depots: HashSet<usize>,
+    routes: Vec<Vec<usize>>,
+    dist: Option<f64>,
+}
+
+impl TourSetup {
+    pub fn new() -> Self {
+        Self {
+            ..Default::default()
+        }
+    }
+
+    pub fn with_depots(depots: HashSet<usize>) -> Self {
+        Self {
+            depots,
+            ..Default::default()
+        }
+    }
+
+    pub fn with_routes(depots: HashSet<usize>, mut routes: Vec<Vec<usize>>) -> Self {
+        for rt in routes.iter_mut().filter(|v| v.len() > 1) {
+            let idx = rt.iter().enumerate().find_map(|(node, ii)| {
+                if depots.contains(&node) {
+                    Some(*ii)
+                } else {
+                    None
+                }
+            });
+
+            if let Some(idx) = idx {
+                rt.rotate_left(idx);
+            }
+        }
+
+        Self {
+            depots,
+            routes,
+            dist: None,
+        }
+    }
+
+    pub fn add_depot(&mut self, depot: usize) {
+        self.depots.insert(depot);
+    }
+
+    pub fn add_route(&mut self, mut route: Vec<usize>) {
+        self.adjust_route(&mut route);
+        self.routes.push(route);
+    }
+
+    fn adjust_route(&self, route: &mut Vec<usize>) {
+        let idx = route.iter().enumerate().find_map(|(ii, node)| {
+            if self.depots.contains(node) {
+                Some(ii)
+            } else {
+                None
+            }
+        });
+
+        if let Some(idx) = idx {
+            route.rotate_left(idx);
+        }
+    }
+
+    pub fn routes(&self) -> &[Vec<usize>] {
+        &self.routes
+    }
+
+    pub fn dist(&self) -> Option<f64> {
+        self.dist
+    }
+}
+
+impl Default for TourSetup {
+    fn default() -> Self {
+        Self {
+            depots: HashSet::new(),
+            routes: Vec::new(),
+            dist: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use core::f64;
+
     use approx::assert_relative_eq;
 
     use crate::{
@@ -1203,7 +1319,7 @@ mod tests {
         tour::Tour,
     };
 
-    use super::{Node, NodeKind, Route};
+    use super::{Node, NodeKind, Route, TourSetup};
 
     #[test]
     fn test_push_back() {
@@ -1348,35 +1464,7 @@ mod tests {
 
     #[test]
     fn test_cw() {
-        let dist_mtx = vec![
-            vec![4., 4., 2.83, 4., 5., 2., 4.24],
-            vec![5.66, 6.32, 8., 8.54, 4.47, 3.16],
-            vec![2.83, 5.66, 8.06, 6., 7.62],
-            vec![2.83, 5.39, 4.47, 7.07],
-            vec![3., 4.47, 7.62],
-            vec![4.12, 7.],
-            vec![3.16],
-        ]
-        .iter()
-        .cloned()
-        .flatten()
-        .collect::<Vec<f64>>();
-
-        let lcd = LowerColDist::new(8, dist_mtx);
-
-        let mut reg = NodeRegistry::new(8);
-        reg.add(vec![0.; 0], NodeKind::Depot, 0.);
-        reg.add(vec![0.; 0], NodeKind::Request, 12.);
-        reg.add(vec![0.; 0], NodeKind::Request, 12.);
-        reg.add(vec![0.; 0], NodeKind::Request, 6.);
-        reg.add(vec![0.; 0], NodeKind::Request, 16.);
-        reg.add(vec![0.; 0], NodeKind::Request, 15.);
-        reg.add(vec![0.; 0], NodeKind::Request, 10.);
-        reg.add(vec![0.; 0], NodeKind::Request, 8.);
-
-        reg.compute(&lcd);
-
-        let mut tour = Tour::new(reg, 30.);
+        let mut tour = Tour::new(make_reg(), 30.);
         tour.init_cw();
 
         let routes = tour.route_vec();
@@ -1461,5 +1549,72 @@ mod tests {
             &mut Node::new(5, NodeKind::Request, 1.),
         );
         assert_eq!(&vec![0, 3, 5, 2, 4, 1], &route.index_vec());
+    }
+
+    #[test]
+    fn test_setup() {
+        let mut tour = Tour::new(make_reg(), 100.);
+
+        let mut setup = TourSetup::new();
+        setup.add_depot(0);
+        setup.add_route((0..8).collect());
+        tour.with_setup(&setup);
+
+        assert_eq!(1, tour.n_routes());
+        let routes = tour.route_vec();
+        assert_eq!(1, routes.len());
+        assert_eq!(&(0..8).collect::<Vec<_>>(), routes.first().unwrap());
+
+        let mut setup = TourSetup::new();
+        setup.add_depot(0);
+        setup.add_route(vec![3, 2, 0, 4, 1]);
+        setup.add_route(vec![6, 0]);
+        setup.add_route(vec![0, 7, 5]);
+        tour.with_setup(&setup);
+
+        assert_eq!(3, tour.n_routes());
+        let routes = tour.route_vec();
+        assert_eq!(3, routes.len());
+        let mut count = 0;
+        for rt in &routes {
+            for rts in setup.routes() {
+                if rt == rts {
+                    count += 1;
+                    break;
+                }
+            }
+        }
+        assert_eq!(3, count);
+    }
+
+    fn make_reg() -> NodeRegistry {
+        let dist_mtx = vec![
+            vec![4., 4., 2.83, 4., 5., 2., 4.24],
+            vec![5.66, 6.32, 8., 8.54, 4.47, 3.16],
+            vec![2.83, 5.66, 8.06, 6., 7.62],
+            vec![2.83, 5.39, 4.47, 7.07],
+            vec![3., 4.47, 7.62],
+            vec![4.12, 7.],
+            vec![3.16],
+        ]
+        .iter()
+        .cloned()
+        .flatten()
+        .collect::<Vec<f64>>();
+
+        let lcd = LowerColDist::new(8, dist_mtx);
+
+        let mut reg = NodeRegistry::new(8);
+        reg.add(vec![0.; 0], NodeKind::Depot, 0.);
+        reg.add(vec![0.; 0], NodeKind::Request, 12.);
+        reg.add(vec![0.; 0], NodeKind::Request, 12.);
+        reg.add(vec![0.; 0], NodeKind::Request, 6.);
+        reg.add(vec![0.; 0], NodeKind::Request, 16.);
+        reg.add(vec![0.; 0], NodeKind::Request, 15.);
+        reg.add(vec![0.; 0], NodeKind::Request, 10.);
+        reg.add(vec![0.; 0], NodeKind::Request, 8.);
+
+        reg.compute(&lcd);
+        reg
     }
 }
