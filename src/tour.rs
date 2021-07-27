@@ -185,6 +185,7 @@ impl Route {
         }
     }
 
+    // TODO: once API is stable, change name to new.
     pub fn new<N>(depot: N, vehicle_capacity: f64, cache: &DistanceCache) -> Self
     where
         N: AsRef<Node>,
@@ -227,10 +228,39 @@ impl Route {
         }
     }
 
+    /// Returns the number of nodes in `Self`.
     #[inline]
-    pub fn n_nodes(&self) -> usize {
+    pub fn count_nodes(&self) -> usize {
         match self.inner {
             Some(inner) => unsafe { inner.as_ref().n_nodes },
+            None => panic_ptr!("Route"),
+        }
+    }
+
+    /// Checks whether the route is empty.
+    ///
+    /// A route is empty when it contains no request nodes. This means that a route containing only
+    /// a depot node is also considered empty.
+    ///
+    /// # Examples
+    /// ```
+    /// # use vehr_core::reg::DistanceCache;
+    /// # use vehr_core::tour::Node;
+    /// # use vehr_core::tour::NodeKind;
+    /// # use vehr_core::tour::Route;
+    /// let mut route = Route::new(&Node::new(0, NodeKind::Depot, 0.), 10., &DistanceCache::default());
+    /// assert!(route.is_empty());
+    ///
+    /// route.push_back(&Node::new(1, NodeKind::Request, 10.));
+    /// assert!(!route.is_empty());
+    /// ```
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        match self.inner {
+            Some(inner) => unsafe {
+                inner.as_ref().n_nodes == 0
+                    || (inner.as_ref().n_nodes == 1 && inner.as_ref().has_depot)
+            },
             None => panic_ptr!("Route"),
         }
     }
@@ -271,9 +301,9 @@ impl Route {
     /// let mut route = Route::new(&Node::new(0, NodeKind::Depot, 0.), 10., &DistanceCache::default());
     /// (1..=3).for_each(|ii| route.push_back(&Node::new(ii, NodeKind::Request, 1.)));
     ///
-    /// assert_eq!(&vec![0, 1, 2, 3], &route.index_vec());
+    /// assert_eq!(&vec![0, 1, 2, 3], &route.export().route());
     /// route.rev(true);
-    /// assert_eq!(&vec![0, 3, 2, 1], &route.index_vec());
+    /// assert_eq!(&vec![0, 3, 2, 1], &route.export().route());
     /// ```
     #[inline]
     pub fn rev(&mut self, rev: bool) {
@@ -286,35 +316,6 @@ impl Route {
     unsafe fn rev_(route: &Option<NonNull<InnerRoute>>, rev: bool) {
         match route {
             Some(inner) => (*inner.as_ptr()).rev = rev,
-            None => panic_ptr!("Route"),
-        }
-    }
-
-    /// Checks whether the route is empty.
-    ///
-    /// A route is empty when it contains no request nodes. This means that a route containing only
-    /// a depot node is also considered empty.
-    ///
-    /// # Examples
-    /// ```
-    /// # use vehr_core::reg::DistanceCache;
-    /// # use vehr_core::tour::Node;
-    /// # use vehr_core::tour::NodeKind;
-    /// # use vehr_core::tour::Route;
-    /// #
-    /// let mut route = Route::new(&Node::new(0, NodeKind::Depot, 0.), 10., &DistanceCache::default());
-    /// assert!(route.is_empty());
-    ///
-    /// route.push_back(&Node::new(1, NodeKind::Request, 10.));
-    /// assert!(!route.is_empty());
-    /// ```
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        match self.inner {
-            Some(inner) => unsafe {
-                inner.as_ref().n_nodes == 0
-                    || (inner.as_ref().n_nodes == 1 && inner.as_ref().has_depot)
-            },
             None => panic_ptr!("Route"),
         }
     }
@@ -393,21 +394,21 @@ impl Route {
     ///
     /// // Adds 1, 2, 3
     /// route.push_back(nodes.get(1).unwrap());
-    /// assert_eq!(&vec![0, 1], &route.index_vec());
+    /// assert_eq!(&vec![0, 1], &route.export().route());
     /// route.push_back(nodes.get(2).unwrap());
-    /// assert_eq!(&vec![0, 1, 2], &route.index_vec());
+    /// assert_eq!(&vec![0, 1, 2], &route.export().route());
     /// route.push_back(nodes.get(3).unwrap());
-    /// assert_eq!(&vec![0, 1, 2, 3], &route.index_vec());
+    /// assert_eq!(&vec![0, 1, 2, 3], &route.export().route());
     ///
     /// route.rev(true);
     ///
     /// // Adds 4, 5, 6
     /// route.push_back(nodes.get(4).unwrap());
-    /// assert_eq!(&vec![0, 3, 2, 1, 4], &route.index_vec());
+    /// assert_eq!(&vec![0, 3, 2, 1, 4], &route.export().route());
     /// route.push_back(nodes.get(5).unwrap());
-    /// assert_eq!(&vec![0, 3, 2, 1, 4, 5], &route.index_vec());
+    /// assert_eq!(&vec![0, 3, 2, 1, 4, 5], &route.export().route());
     /// route.push_back(nodes.get(6).unwrap());
-    /// assert_eq!(&vec![0, 3, 2, 1, 4, 5, 6], &route.index_vec());
+    /// assert_eq!(&vec![0, 3, 2, 1, 4, 5, 6], &route.export().route());
     /// ```
     #[inline]
     pub fn push_back(&mut self, node: &Node) {
@@ -431,21 +432,21 @@ impl Route {
     ///
     /// // Adds 1, 2, 3
     /// route.push_front(nodes.get(1).unwrap());
-    /// assert_eq!(&vec![0, 1], &route.index_vec());
+    /// assert_eq!(&vec![0, 1], &route.export().route());
     /// route.push_front(nodes.get(2).unwrap());
-    /// assert_eq!(&vec![0, 2, 1], &route.index_vec());
+    /// assert_eq!(&vec![0, 2, 1], &route.export().route());
     /// route.push_front(nodes.get(3).unwrap());
-    /// assert_eq!(&vec![0, 3, 2, 1], &route.index_vec());
+    /// assert_eq!(&vec![0, 3, 2, 1], &route.export().route());
     ///
     /// route.rev(true);
     ///
     /// // Adds 4, 5, 6
     /// route.push_front(nodes.get(4).unwrap());
-    /// assert_eq!(&vec![0, 4, 1, 2, 3], &route.index_vec());
+    /// assert_eq!(&vec![0, 4, 1, 2, 3], &route.export().route());
     /// route.push_front(nodes.get(5).unwrap());
-    /// assert_eq!(&vec![0, 5, 4, 1, 2, 3], &route.index_vec());
+    /// assert_eq!(&vec![0, 5, 4, 1, 2, 3], &route.export().route());
     /// route.push_front(nodes.get(6).unwrap());
-    /// assert_eq!(&vec![0, 6, 5, 4, 1, 2, 3], &route.index_vec());
+    /// assert_eq!(&vec![0, 6, 5, 4, 1, 2, 3], &route.export().route());
     /// ```
     #[inline]
     pub fn push_front(&mut self, node: &Node) {
@@ -729,7 +730,7 @@ impl Route {
     /// }).collect();
     ///
     /// Route::eject(nodes.get_mut(2).unwrap());
-    /// assert_eq!(&vec![0, 1, 2 , 4], &route.index_vec());
+    /// assert_eq!(&vec![0, 1, 2 , 4], &route.export().route());
     /// ```
     pub fn eject(node: &mut Node) {
         if let Some(inner) = node.inner {
@@ -775,13 +776,24 @@ impl Route {
         result
     }
 
-    pub fn index_vec(&self) -> Vec<usize> {
+    #[inline]
+    pub fn export(&self) -> RouteSetup {
         match self.inner {
-            Some(_) => {
-                let mut result = Vec::with_capacity(self.n_nodes());
-                self.node_iter().for_each(|node| result.push(node.index()));
-                result
-            }
+            Some(inner) => unsafe {
+                let mut route = Vec::with_capacity(self.count_nodes());
+                let mut dist = 0.;
+                let cache = &inner.as_ref().cache;
+
+                if self.is_empty() {
+                    self.node_iter().for_each(|node| route.push(node.index()));
+                } else {
+                    self.arc_iter().for_each(|arc| {
+                        route.push(arc.tail().index());
+                        dist += cache.distance(arc.tail(), arc.head());
+                    });
+                }
+                RouteSetup::new(route, dist)
+            },
             None => panic_ptr!("Route"),
         }
     }
@@ -808,13 +820,7 @@ impl Route {
         match self.inner {
             Some(inner) => unsafe {
                 let n_nodes = inner.as_ref().n_nodes;
-                let len = if n_nodes <= 1 {
-                    0
-                } else if n_nodes == 2 {
-                    1
-                } else {
-                    n_nodes
-                };
+                let len = if n_nodes > 1 { n_nodes } else { 0 };
 
                 ArcIter::new(inner.as_ref().rev, len, inner.as_ref().first)
             },
@@ -1019,8 +1025,9 @@ impl Tour {
         self.reg.node_mut(index)
     }
 
+    // Returns the number of routes in `Self`.
     #[inline]
-    pub fn n_routes(&self) -> usize {
+    pub fn count_routes(&self) -> usize {
         self.routes.len()
     }
 
@@ -1035,15 +1042,23 @@ impl Tour {
     }
 
     #[inline]
-    pub fn route_vec(&self) -> Vec<Vec<usize>> {
-        self.routes.iter().map(|r| r.index_vec()).collect()
-    }
+    pub fn export(&self) -> TourSetup {
+        let depots = self.reg.depots.clone();
+        let mut dist = 0.;
+        let routes: Vec<_> = self
+            .into_iter()
+            .map(|route| {
+                let r = route.export();
+                dist += r.dist();
+                r
+            })
+            .collect();
 
-    #[inline]
-    pub fn route_vec_sorted(&self) -> Vec<usize> {
-        let mut tmp: Vec<_> = self.routes.iter().map(|r| r.index_vec()).collect();
-        tmp.sort_by(|a, b| a[1].cmp(&b[1]));
-        tmp.into_iter().flatten().collect()
+        TourSetup {
+            depots,
+            routes,
+            dist,
+        }
     }
 
     #[inline]
@@ -1141,13 +1156,39 @@ impl Tour {
         }
 
         let mut routes = Vec::with_capacity(setup.routes.len());
-        for vr in &setup.routes {
-            let depot = self.reg.node(*vr.first().unwrap()).unwrap();
-            let mut route = Route::new(depot, self.vehicle_capacity, self.reg.cache());
-            vr.iter().skip(1).for_each(|idx| {
-                let node = self.reg.node(*idx).unwrap();
-                route.push_back(node);
-            });
+        for vr in setup {
+            let mut it1 = vr.route.iter();
+            let mut depot_id = None;
+            let mut count = 0;
+
+            while let Some(node_id) = it1.next() {
+                count += 1;
+                if self.reg.depots.contains(node_id) {
+                    depot_id = Some(node_id);
+                    break;
+                }
+            }
+
+            let mut route = match depot_id {
+                Some(node_id) => {
+                    let depot = self.reg.node(*node_id).unwrap();
+                    Route::new(depot, self.vehicle_capacity, self.reg.cache())
+                }
+                None => Route::new_(self.vehicle_capacity, self.reg.cache()),
+            };
+
+            if count == vr.count_nodes() {
+                vr.route.iter().take(count - 1).for_each(|idx| {
+                    let node = self.reg.node(*idx).unwrap();
+                    route.push_back(node);
+                })
+            } else {
+                it1.chain(vr.route.iter().take(count - 1)).for_each(|idx| {
+                    let node = self.reg.node(*idx).unwrap();
+                    route.push_back(node);
+                })
+            };
+
             routes.push(route);
         }
 
@@ -1157,16 +1198,6 @@ impl Tour {
     #[inline]
     pub fn drop_empty(&mut self) {
         self.routes.retain(|r| !r.is_empty());
-    }
-
-    #[inline]
-    pub fn route_iter(&self) -> std::slice::Iter<Route> {
-        self.routes.iter()
-    }
-
-    #[inline]
-    pub fn route_iter_mut(&mut self) -> std::slice::IterMut<Route> {
-        self.routes.iter_mut()
     }
 }
 
@@ -1223,10 +1254,30 @@ impl<'s> Ord for SavingPair<'s> {
     }
 }
 
+impl<'a> IntoIterator for &'a Tour {
+    type Item = &'a Route;
+
+    type IntoIter = std::slice::Iter<'a, Route>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.routes.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut Tour {
+    type Item = &'a mut Route;
+
+    type IntoIter = std::slice::IterMut<'a, Route>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.routes.iter_mut()
+    }
+}
+
 pub struct TourSetup {
     depots: HashSet<usize>,
-    routes: Vec<Vec<usize>>,
-    dist: Option<f64>,
+    routes: Vec<RouteSetup>,
+    dist: f64,
 }
 
 impl TourSetup {
@@ -1243,41 +1294,56 @@ impl TourSetup {
         }
     }
 
-    pub fn with_routes(depots: HashSet<usize>, mut routes: Vec<Vec<usize>>) -> Self {
-        for rt in routes.iter_mut().filter(|v| v.len() > 1) {
-            let idx = rt.iter().enumerate().find_map(|(node, ii)| {
-                if depots.contains(&node) {
-                    Some(*ii)
-                } else {
-                    None
-                }
-            });
-
-            if let Some(idx) = idx {
-                rt.rotate_left(idx);
-            }
-        }
+    pub fn with_routes(depots: HashSet<usize>, routes: Vec<Vec<usize>>) -> Self {
+        let route_setup: Vec<_> = routes
+            .into_iter()
+            .filter(|v| v.len() > 1)
+            .map(|rt| Self::make_route_setup(&depots, rt))
+            .collect();
 
         Self {
             depots,
-            routes,
-            dist: None,
+            routes: route_setup,
+            dist: 0.,
         }
     }
 
+    #[inline]
     pub fn add_depot(&mut self, depot: usize) {
         self.depots.insert(depot);
     }
 
-    pub fn add_route(&mut self, mut route: Vec<usize>) {
-        self.adjust_route(&mut route);
-        self.routes.push(route);
+    #[inline]
+    pub fn add_route(&mut self, route: Vec<usize>) {
+        self.routes.push(RouteSetup::new(route, 0.));
     }
 
-    fn adjust_route(&self, route: &mut Vec<usize>) {
-        let idx = route.iter().enumerate().find_map(|(ii, node)| {
-            if self.depots.contains(node) {
-                Some(ii)
+    #[inline]
+    pub fn reorder(&mut self) {
+        for ridx in 0..self.routes.len() {
+            let idx = self.routes[ridx]
+                .route
+                .iter()
+                .enumerate()
+                .find_map(|(ii, node)| {
+                    if self.depots.contains(&node) {
+                        Some(ii)
+                    } else {
+                        None
+                    }
+                });
+
+            if let Some(idx) = idx {
+                self.routes[ridx].route.rotate_left(idx);
+            }
+        }
+    }
+
+    #[inline]
+    fn make_route_setup(depots: &HashSet<usize>, mut route: Vec<usize>) -> RouteSetup {
+        let idx = route.iter().enumerate().find_map(|(node, ii)| {
+            if depots.contains(&node) {
+                Some(*ii)
             } else {
                 None
             }
@@ -1286,14 +1352,59 @@ impl TourSetup {
         if let Some(idx) = idx {
             route.rotate_left(idx);
         }
+
+        RouteSetup::new(route, 0.)
     }
 
-    pub fn routes(&self) -> &[Vec<usize>] {
-        &self.routes
-    }
-
-    pub fn dist(&self) -> Option<f64> {
+    #[inline]
+    pub fn dist(&self) -> f64 {
         self.dist
+    }
+
+    // Returns the number of routes in the tour setup.
+    #[inline]
+    pub fn count_routes(&self) -> usize {
+        self.routes.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.routes.is_empty()
+    }
+
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<&RouteSetup> {
+        self.routes.get(index)
+    }
+
+    #[inline]
+    pub fn first(&self) -> Option<&RouteSetup> {
+        self.routes.first()
+    }
+
+    #[inline]
+    pub fn last(&self) -> Option<&RouteSetup> {
+        self.routes.last()
+    }
+}
+
+impl<'s> IntoIterator for &'s TourSetup {
+    type Item = &'s RouteSetup;
+
+    type IntoIter = std::slice::Iter<'s, RouteSetup>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.routes.iter()
+    }
+}
+
+impl<'s> IntoIterator for &'s mut TourSetup {
+    type Item = &'s mut RouteSetup;
+
+    type IntoIter = std::slice::IterMut<'s, RouteSetup>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.routes.iter_mut()
     }
 }
 
@@ -1302,10 +1413,57 @@ impl Default for TourSetup {
         Self {
             depots: HashSet::new(),
             routes: Vec::new(),
-            dist: None,
+            dist: 0.,
         }
     }
 }
+
+#[derive(Debug)]
+pub struct RouteSetup {
+    route: Vec<usize>,
+    dist: f64,
+}
+
+impl RouteSetup {
+    fn new(route: Vec<usize>, dist: f64) -> Self {
+        Self { route, dist }
+    }
+
+    pub fn into_value(self) -> (Vec<usize>, f64) {
+        (self.route, self.dist)
+    }
+
+    pub fn route(&self) -> &[usize] {
+        &self.route
+    }
+
+    pub fn dist(&self) -> f64 {
+        self.dist
+    }
+
+    // Returns the number of nodes in the route setup.
+    #[inline]
+    pub fn count_nodes(&self) -> usize {
+        self.route.len()
+    }
+}
+
+impl<'s> IntoIterator for &'s RouteSetup {
+    type Item = &'s usize;
+    type IntoIter = std::slice::Iter<'s, usize>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.route.iter()
+    }
+}
+
+impl PartialEq for RouteSetup {
+    fn eq(&self, other: &Self) -> bool {
+        self.route.eq(&other.route)
+    }
+}
+
+impl Eq for RouteSetup {}
 
 #[cfg(test)]
 mod tests {
@@ -1339,12 +1497,18 @@ mod tests {
             .for_each(|node| route.push_back(node));
 
         assert_eq!(100., route.load());
-        assert_eq!(11, route.n_nodes());
+        assert_eq!(11, route.count_nodes());
 
-        assert_eq!(&vec![0, 5, 4, 3, 2, 1, 10, 9, 8, 7, 6], &route.index_vec());
+        assert_eq!(
+            &vec![0, 5, 4, 3, 2, 1, 10, 9, 8, 7, 6],
+            &route.export().route()
+        );
 
         route.rev(false);
-        assert_eq!(&vec![0, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5], &route.index_vec());
+        assert_eq!(
+            &vec![0, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5],
+            &route.export().route()
+        );
     }
 
     #[test]
@@ -1364,12 +1528,18 @@ mod tests {
             .for_each(|node| route.push_front(node));
 
         assert_eq!(100., route.load());
-        assert_eq!(11, route.n_nodes());
+        assert_eq!(11, route.count_nodes());
 
-        assert_eq!(&vec![0, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5], &route.index_vec());
+        assert_eq!(
+            &vec![0, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5],
+            &route.export().route()
+        );
 
         route.rev(false);
-        assert_eq!(&vec![0, 5, 4, 3, 2, 1, 10, 9, 8, 7, 6], &route.index_vec());
+        assert_eq!(
+            &vec![0, 5, 4, 3, 2, 1, 10, 9, 8, 7, 6],
+            &route.export().route()
+        );
     }
 
     #[test]
@@ -1392,7 +1562,10 @@ mod tests {
             .for_each(|node| route2.push_front(node));
 
         route1.append_back(&mut route2);
-        assert_eq!(&vec![0, 5, 4, 3, 2, 1, 6, 7, 8, 9, 10], &route1.index_vec());
+        assert_eq!(
+            &vec![0, 5, 4, 3, 2, 1, 6, 7, 8, 9, 10],
+            &route1.export().route()
+        );
     }
 
     #[test]
@@ -1415,7 +1588,10 @@ mod tests {
             .for_each(|node| route2.push_front(node));
 
         route1.append_front(&mut route2);
-        assert_eq!(&vec![0, 6, 7, 8, 9, 10, 5, 4, 3, 2, 1], &route1.index_vec());
+        assert_eq!(
+            &vec![0, 6, 7, 8, 9, 10, 5, 4, 3, 2, 1],
+            &route1.export().route()
+        );
     }
 
     #[test]
@@ -1432,11 +1608,11 @@ mod tests {
         route.pop_back();
 
         assert_eq!(0., route.load());
-        assert_eq!(1, route.n_nodes());
-        assert_eq!(&vec![0], &route.index_vec());
+        assert_eq!(1, route.count_nodes());
+        assert_eq!(&vec![0], &route.export().route());
 
         route.rev(true);
-        assert_eq!(&vec![0], &route.index_vec());
+        assert_eq!(&vec![0], &route.export().route());
         assert!(&route.is_empty());
     }
 
@@ -1454,11 +1630,11 @@ mod tests {
         route.pop_front();
 
         assert_eq!(0., route.load());
-        assert_eq!(1, route.n_nodes());
-        assert_eq!(&vec![0], &route.index_vec());
+        assert_eq!(1, route.count_nodes());
+        assert_eq!(&vec![0], &route.export().route());
 
         route.rev(true);
-        assert_eq!(&vec![0], &route.index_vec());
+        assert_eq!(&vec![0], &route.export().route());
         assert!(&route.is_empty());
     }
 
@@ -1467,8 +1643,8 @@ mod tests {
         let mut tour = Tour::new(make_reg(), 30.);
         tour.init_cw();
 
-        let routes = tour.route_vec();
-        assert_eq!(3, routes.len());
+        let routes = tour.export();
+        assert_eq!(3, routes.count_routes());
 
         // let mut tourset = TourSet::new();
         // tourset.insert(vec![0, 1, 7, 6, 0, 2, 5, 0, 3, 4]);
@@ -1500,7 +1676,7 @@ mod tests {
         Route::eject(nodes.get_mut(5).unwrap());
         Route::eject(nodes.get_mut(9).unwrap());
 
-        assert_eq!(&vec![0, 4, 2, 1, 9, 8, 7], &route.index_vec());
+        assert_eq!(&vec![0, 4, 2, 1, 9, 8, 7], &route.export().route());
     }
 
     #[test]
@@ -1513,18 +1689,18 @@ mod tests {
             .collect();
         nodes.iter().for_each(|node| route.push_back(node));
 
-        assert_eq!(&vec![0, 1, 2, 3], &route.index_vec());
+        assert_eq!(&vec![0, 1, 2, 3], &route.export().route());
         Route::insert_back(
             nodes.get_mut(1).unwrap(),
             &mut Node::new(4, NodeKind::Request, 1.),
         );
-        assert_eq!(&vec![0, 1, 2, 4, 3], &route.index_vec());
+        assert_eq!(&vec![0, 1, 2, 4, 3], &route.export().route());
         route.rev(true);
         Route::insert_back(
             nodes.get_mut(1).unwrap(),
             &mut Node::new(5, NodeKind::Request, 1.),
         );
-        assert_eq!(&vec![0, 3, 4, 2, 5, 1], &route.index_vec());
+        assert_eq!(&vec![0, 3, 4, 2, 5, 1], &route.export().route());
     }
 
     #[test]
@@ -1537,18 +1713,18 @@ mod tests {
             .collect();
         nodes.iter().for_each(|node| route.push_back(node));
 
-        assert_eq!(&vec![0, 1, 2, 3], &route.index_vec());
+        assert_eq!(&vec![0, 1, 2, 3], &route.export().route());
         Route::insert_front(
             nodes.get_mut(1).unwrap(),
             &mut Node::new(4, NodeKind::Request, 1.),
         );
-        assert_eq!(&vec![0, 1, 4, 2, 3], &route.index_vec());
+        assert_eq!(&vec![0, 1, 4, 2, 3], &route.export().route());
         route.rev(true);
         Route::insert_front(
             nodes.get_mut(1).unwrap(),
             &mut Node::new(5, NodeKind::Request, 1.),
         );
-        assert_eq!(&vec![0, 3, 5, 2, 4, 1], &route.index_vec());
+        assert_eq!(&vec![0, 3, 5, 2, 4, 1], &route.export().route());
     }
 
     #[test]
@@ -1556,28 +1732,31 @@ mod tests {
         let mut tour = Tour::new(make_reg(), 100.);
 
         let mut setup = TourSetup::new();
-        setup.add_depot(0);
         setup.add_route((0..8).collect());
         tour.with_setup(&setup);
 
-        assert_eq!(1, tour.n_routes());
-        let routes = tour.route_vec();
-        assert_eq!(1, routes.len());
-        assert_eq!(&(0..8).collect::<Vec<_>>(), routes.first().unwrap());
+        assert_eq!(1, tour.count_routes());
+        let toursetup = tour.export();
+        assert_eq!(1, toursetup.count_routes());
+        assert_eq!(
+            &(0..8).collect::<Vec<_>>(),
+            toursetup.first().unwrap().route()
+        );
 
         let mut setup = TourSetup::new();
-        setup.add_depot(0);
         setup.add_route(vec![3, 2, 0, 4, 1]);
         setup.add_route(vec![6, 0]);
         setup.add_route(vec![0, 7, 5]);
+        setup.add_depot(0);
         tour.with_setup(&setup);
+        setup.reorder();
 
-        assert_eq!(3, tour.n_routes());
-        let routes = tour.route_vec();
-        assert_eq!(3, routes.len());
+        assert_eq!(setup.count_routes(), tour.count_routes());
+        let toursetup = tour.export();
+        assert_eq!(3, toursetup.count_routes());
         let mut count = 0;
-        for rt in &routes {
-            for rts in setup.routes() {
+        for rt in &toursetup {
+            for rts in &setup {
                 if rt == rts {
                     count += 1;
                     break;
