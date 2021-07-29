@@ -3,6 +3,7 @@ use std::{
     collections::{BinaryHeap, HashSet},
     marker::PhantomData,
     ptr::NonNull,
+    slice::SliceIndex,
 };
 
 use crate::{
@@ -1031,13 +1032,25 @@ impl Tour {
         self.routes.len()
     }
 
+    /// Returns a reference to a [`Route`] or subslice depending on the type of index.
+    ///
+    /// - If given a position, returns a reference to the [`Route`] at that position or [`None`] if
+    /// out of bounds.
+    /// - If given a range, returns the subslice corresponding to that range or [`None`] if out of bounds.
     #[inline]
-    pub fn route(&self, index: usize) -> Option<&Route> {
+    pub fn route<I>(&self, index: I) -> Option<&I::Output>
+    where
+        I: SliceIndex<[Route]>,
+    {
         self.routes.get(index)
     }
 
+    /// Returns a mutable reference to a [`Route`] or subslice depending on the type of index (see [`Tour::route`]).
     #[inline]
-    pub fn route_mut(&mut self, index: usize) -> Option<&mut Route> {
+    pub fn route_mut<I>(&mut self, index: I) -> Option<&mut I::Output>
+    where
+        I: SliceIndex<[Route]>,
+    {
         self.routes.get_mut(index)
     }
 
@@ -1198,6 +1211,18 @@ impl Tour {
     #[inline]
     pub fn drop_empty(&mut self) {
         self.routes.retain(|r| !r.is_empty());
+    }
+
+    /// Returns an iterator of routes.
+    #[inline]
+    pub fn route_iter(&self) -> std::slice::Iter<Route> {
+        self.routes.iter()
+    }
+
+    /// Returns an iterator that allows modifying each route.
+    #[inline]
+    pub fn route_iter_mut(&mut self) -> std::slice::IterMut<Route> {
+        self.routes.iter_mut()
     }
 }
 
